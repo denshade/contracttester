@@ -34,7 +34,26 @@ def ensure_verifier_trigger(engine: Engine) -> None:
             connection.execute(
                 text("ALTER TABLE verifiers ADD COLUMN verification_trigger VARCHAR(500) NOT NULL DEFAULT ''")
             )
-    _fill_blank_seed_triggers(engine)
+
+
+def ensure_verifier_call(engine: Engine) -> None:
+    """Add the token and headers sent when a verification URL is called."""
+    if engine.dialect.name != "sqlite":
+        return
+    tables = inspect(engine).get_table_names()
+    if "verifiers" not in tables:
+        return
+    columns = {column["name"] for column in inspect(engine).get_columns("verifiers")}
+    statements = []
+    if "verification_token" not in columns:
+        statements.append("ALTER TABLE verifiers ADD COLUMN verification_token VARCHAR(500) NOT NULL DEFAULT ''")
+    if "verification_headers" not in columns:
+        statements.append("ALTER TABLE verifiers ADD COLUMN verification_headers TEXT NOT NULL DEFAULT '[]'")
+    if statements:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+    _upgrade_seed_triggers(engine)
 
 
 def ensure_publisher_name(engine: Engine) -> None:
@@ -70,28 +89,35 @@ def _fill_blank_publisher_names(engine: Engine) -> None:
             )
 
 
-def _fill_blank_seed_triggers(engine: Engine) -> None:
-    """Databases created before the trigger field have an empty value on the sample verifiers."""
+def _upgrade_seed_triggers(engine: Engine) -> None:
+    """Sample verifiers created before triggers were URLs get a URL, token, and headers."""
     from app.seed import (
         ACTIVE_VERIFIER,
+        DOCK_HEADER_JSON,
+        DOCK_TOKEN,
         DOCK_TRIGGER,
         DOCK_VERIFIER,
+        LEGACY_HEADER_JSON,
+        LEGACY_TOKEN,
         LEGACY_TRIGGER,
         LEGACY_VERIFIER,
+        SCHEMA_HEADER_JSON,
+        SCHEMA_TOKEN,
         SCHEMA_TRIGGER,
     )
 
-    pairs = (
-        (ACTIVE_VERIFIER, SCHEMA_TRIGGER),
-        (LEGACY_VERIFIER, LEGACY_TRIGGER),
-        (DOCK_VERIFIER, DOCK_TRIGGER),
+    rows = (
+        (ACTIVE_VERIFIER, "gitlab:schema-shape", SCHEMA_TRIGGER, SCHEMA_TOKEN, SCHEMA_HEADER_JSON),
+        (LEGACY_VERIFIER, "gitlab:legacy-checksum", LEGACY_TRIGGER, LEGACY_TOKEN, LEGACY_HEADER_JSON),
+        (DOCK_VERIFIER, "gitlab:dock-window", DOCK_TRIGGER, DOCK_TOKEN, DOCK_HEADER_JSON),
     )
     with engine.begin() as connection:
-        for name, trigger in pairs:
+        for name, old, trigger, token, headers in rows:
             connection.execute(
                 text(
-                    "UPDATE verifiers SET verification_trigger = :trigger "
-                    "WHERE name = :name AND verification_trigger = ''"
+                    "UPDATE verifiers SET verification_trigger = :trigger, "
+                    "verification_token = :token, verification_headers = :headers "
+                    "WHERE name = :name AND verification_trigger IN ('', :old)"
                 ),
-                {"name": name, "trigger": trigger},
+                {"name": name, "old": old, "trigger": trigger, "token": token, "headers": headers},
             )

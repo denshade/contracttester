@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Contract Tester{% endblock %}
+{% block content %}
+<p class="back"><a href="/contracts">Contracts</a></p>
+<h1>{{ title }}</h1>
+<section class="panel stack">
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form class="stack" method="post" action="{{ action }}">
+    <div class="field">
+      <label for="contract-name">Name</label>
+      <input id="contract-name" name="name" type="text" value="{{ name_value }}" required>
+    </div>
+    <div class="field">
+      <label for="publisher-name">Publisher</label>
+      <input id="publisher-name" name="publisher_name" type="text" value="{{ publisher_value }}" required>
+      <p class="muted">The name applies to every version. The publisher is saved on this version.</p>
+    </div>
+    <div class="actions">
+      <button class="button" id="save-contract" type="submit">{{ submit_label }}</button>
+      <a class="button secondary" href="/contracts">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

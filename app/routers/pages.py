@@ -154,6 +154,8 @@ def verifier_detail(verifier_id: int, request: Request, db: Db, user: CurrentUse
         version_value=str(detail.version),
         active_value=detail.active,
         trigger_value=detail.verification_trigger,
+        token_value=detail.verification_token,
+        headers_value=detail.headers_text,
     )
 
 
@@ -167,6 +169,8 @@ def save_verifier(
     version: str = Form(),
     active: str = Form(),
     verification_trigger: str = Form(),
+    verification_token: str = Form(""),
+    verification_headers: str = Form(""),
 ):
     try:
         verifier = services.get_verifier(db, user.company_id, verifier_id)
@@ -184,6 +188,8 @@ def save_verifier(
             version,
             active == "true",
             verification_trigger,
+            verification_token,
+            verification_headers,
         )
     except DomainError as exc:
         db.rollback()
@@ -200,6 +206,8 @@ def save_verifier(
             version_value=version,
             active_value=active == "true",
             trigger_value=verification_trigger,
+            token_value=verification_token,
+            headers_value=verification_headers,
         )
     request.session["flash"] = "Verifier saved."
     return RedirectResponse(f"/verifiers/{verifier_id}", status_code=303)
@@ -222,6 +230,46 @@ def _missing_verifier(request: Request, user: User):
 def contracts(request: Request, db: Db, user: CurrentUser):
     rows = services.contract_overview(db, user.company_id)
     return render(request, "contracts.html", user, section="contracts", contracts=rows)
+
+
+@router.get("/contracts/new")
+def new_contract_form(request: Request, user: CurrentUser):
+    return _contract_form(
+        request,
+        user,
+        title="New contract",
+        action="/contracts",
+        name_value="",
+        publisher_value="",
+        submit_label="Create contract",
+    )
+
+
+@router.post("/contracts")
+def create_contract_page(
+    request: Request,
+    db: Db,
+    user: CurrentUser,
+    name: str = Form(),
+    publisher_name: str = Form(),
+):
+    try:
+        services.create_contract(db, user.company_id, name, publisher_name, [])
+    except DomainError as exc:
+        db.rollback()
+        return _contract_form(
+            request,
+            user,
+            title="New contract",
+            action="/contracts",
+            name_value=name,
+            publisher_value=publisher_name,
+            submit_label="Create contract",
+            error=exc.detail,
+            status_code=exc.status_code,
+        )
+    request.session["flash"] = "Contract created."
+    return RedirectResponse("/contracts", status_code=303)
 
 
 @router.get("/contracts/{contract_id}")
@@ -265,6 +313,56 @@ def update_contract_publisher(
     return RedirectResponse(f"/contracts/{contract_id}", status_code=303)
 
 
+@router.get("/contracts/{contract_id}/edit")
+def edit_contract_form(contract_id: int, request: Request, db: Db, user: CurrentUser):
+    try:
+        contract = services.get_contract(db, user.company_id, contract_id)
+    except DomainError as exc:
+        if exc.status_code != 404:
+            raise
+        return render(request, "not_found.html", user, status_code=404, section="contracts")
+    return _contract_form(
+        request,
+        user,
+        title=f"Edit {contract.name}",
+        action=f"/contracts/{contract.id}/edit",
+        name_value=contract.name,
+        publisher_value=contract.publisher_name,
+        submit_label="Save contract",
+    )
+
+
+@router.post("/contracts/{contract_id}/edit")
+def edit_contract(
+    contract_id: int,
+    request: Request,
+    db: Db,
+    user: CurrentUser,
+    name: str = Form(),
+    publisher_name: str = Form(),
+):
+    try:
+        contract = services.get_contract(db, user.company_id, contract_id)
+        services.update_contract_fields(db, contract, name, publisher_name)
+    except DomainError as exc:
+        if exc.status_code == 404:
+            return render(request, "not_found.html", user, status_code=404, section="contracts")
+        db.rollback()
+        return _contract_form(
+            request,
+            user,
+            title="Edit contract",
+            action=f"/contracts/{contract_id}/edit",
+            name_value=name,
+            publisher_value=publisher_name,
+            submit_label="Save contract",
+            error=exc.detail,
+            status_code=exc.status_code,
+        )
+    request.session["flash"] = "Contract saved."
+    return RedirectResponse("/contracts", status_code=303)
+
+
 @router.get("/contracts/{contract_id}/remove")
 def confirm_remove(contract_id: int, request: Request, db: Db, user: CurrentUser):
     try:
@@ -292,5 +390,32 @@ def remove_contract(contract_id: int, request: Request, db: Db, user: CurrentUse
         if exc.status_code != 404:
             raise
         return render(request, "not_found.html", user, status_code=404, section="contracts")
-    request.session["flash"] = "Contract removed."
+    request.session["flash"] = "Contract deleted."
     return RedirectResponse("/contracts", status_code=303)
+
+
+def _contract_form(
+    request: Request,
+    user: User,
+    *,
+    title: str,
+    action: str,
+    name_value: str,
+    publisher_value: str,
+    submit_label: str,
+    error: str | None = None,
+    status_code: int = 200,
+):
+    return render(
+        request,
+        "contract_form.html",
+        user,
+        status_code=status_code,
+        section="contracts",
+        title=title,
+        action=action,
+        name_value=name_value,
+        publisher_value=publisher_value,
+        submit_label=submit_label,
+        error=error,
+    )

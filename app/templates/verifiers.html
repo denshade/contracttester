@@ -12,15 +12,19 @@
         <th scope="col">Version</th>
         <th scope="col">Active</th>
         <th scope="col">Verification trigger</th>
+        <th scope="col">Token</th>
+        <th scope="col">Headers</th>
       </tr>
     </thead>
     <tbody id="verifiers">
       {% for verifier in verifiers %}
-      <tr data-verifier-name="{{ verifier.name }}" data-verifier-id="{{ verifier.id }}" data-active="{{ 'yes' if verifier.active else 'no' }}">
+      <tr data-verifier-name="{{ verifier.name }}" data-verifier-id="{{ verifier.id }}" data-active="{{ 'yes' if verifier.active else 'no' }}" data-token="{{ verifier.verification_token }}">
         <td data-label="Name"><a href="/verifiers/{{ verifier.id }}">{{ verifier.name }}</a></td>
         <td data-label="Version">{{ verifier.version }}</td>
         <td data-label="Active"><span class="pill {{ 'yes' if verifier.active else 'no' }}">{{ "Yes" if verifier.active else "No" }}</span></td>
         <td data-label="Verification trigger"><code>{{ verifier.verification_trigger }}</code></td>
+        <td data-label="Token">{% if verifier.verification_token %}<code>{{ verifier.verification_token }}</code>{% else %}<span class="muted">None</span>{% endif %}</td>
+        <td data-label="Headers">{% if verifier.headers_text %}<pre class="payload">{{ verifier.headers_text }}</pre>{% else %}<span class="muted">None</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

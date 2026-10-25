@@ -23,6 +23,8 @@ from app.seed import (
     DOCK_PUBLISHER,
     DOCK_VERIFIER,
     INACTIVE_CONTRACT,
+    SCHEMA_HEADER_LINES,
+    SCHEMA_TOKEN,
     SCHEMA_TRIGGER,
     LEGACY_VERIFIED_AT,
     LEGACY_VERIFIER,
@@ -110,6 +112,39 @@ def test_contract_page_saves_the_publisher_name(page: Page, base_url: str):
     expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_attribute("data-publisher", "Pier Office")
 
 
+def test_contracts_can_be_created_edited_and_deleted(page: Page, base_url: str):
+    _sign_in(page, base_url)
+    page.locator("#new-contract").click()
+    page.locator("#contract-name").fill("Parcel")
+    page.locator("#publisher-name").fill("Desk")
+    page.locator("#save-contract").click()
+
+    expect(page.locator(".flash")).to_have_text("Contract created.")
+    row = page.locator("tr[data-contract-name='Parcel']")
+    expect(row).to_have_attribute("data-publisher", "Desk")
+    row.get_by_role("link", name="Parcel").click()
+    expect(page.get_by_role("heading", name="Parcel")).to_be_visible()
+    expect(page.locator(".lede")).to_have_text("Version 1")
+    expect(page.get_by_text("This version has no statements.")).to_be_visible()
+
+    page.locator("nav").get_by_role("link", name="Contracts").click()
+    page.locator("tr[data-contract-name='Parcel']").get_by_role("link", name="Edit").click()
+    expect(page.locator("#contract-name")).to_have_value("Parcel")
+    page.locator("#contract-name").fill("Parcel API")
+    page.locator("#publisher-name").fill("Pier Office")
+    page.locator("#save-contract").click()
+
+    expect(page.locator(".flash")).to_have_text("Contract saved.")
+    edited = page.locator("tr[data-contract-name='Parcel API']")
+    expect(edited).to_have_attribute("data-publisher", "Pier Office")
+    edited.get_by_role("link", name="Delete").click()
+    expect(page.get_by_role("heading", name="Delete Parcel API?")).to_be_visible()
+    page.locator("#confirm-remove").click()
+    expect(page.locator(".flash")).to_have_text("Contract deleted.")
+    expect(page.locator("tr[data-contract-name='Parcel API']")).to_have_count(0)
+    expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_count(1)
+
+
 def test_contract_page_shows_versions_verifiers_and_statements(page: Page, base_url: str):
     _sign_in(page, base_url)
     page.get_by_role("link", name=ACTIVE_CONTRACT).click()
@@ -150,8 +185,8 @@ def test_removing_a_contract_asks_for_confirmation(page: Page, base_url: str):
     page.get_by_role("link", name=ACTIVE_CONTRACT).click()
     page.locator("#remove-contract").click()
 
-    expect(page.get_by_role("heading", name=f"Remove {ACTIVE_CONTRACT}?")).to_be_visible()
-    expect(page.get_by_text(f"Are you sure you want to remove {ACTIVE_CONTRACT}?")).to_be_visible()
+    expect(page.get_by_role("heading", name=f"Delete {ACTIVE_CONTRACT}?")).to_be_visible()
+    expect(page.get_by_text(f"Are you sure you want to delete {ACTIVE_CONTRACT}?")).to_be_visible()
 
     page.get_by_role("link", name="Cancel").click()
     expect(page.get_by_role("heading", name=ACTIVE_CONTRACT)).to_be_visible()
@@ -159,7 +194,7 @@ def test_removing_a_contract_asks_for_confirmation(page: Page, base_url: str):
 
     page.locator("#remove-contract").click()
     page.locator("#confirm-remove").click()
-    expect(page.locator(".flash")).to_have_text("Contract removed.")
+    expect(page.locator(".flash")).to_have_text("Contract deleted.")
     expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_count(0)
     expect(page.locator(f"tr[data-contract-name='{INACTIVE_CONTRACT}']")).to_have_count(1)
 
@@ -214,24 +249,33 @@ def test_verifier_page_lists_fields_and_saves_edits(page: Page, base_url: str):
     expect(page.locator("#verifier-version")).to_have_value("1")
     expect(page.locator("#verifier-active")).to_have_value("true")
     expect(page.locator("#verifier-trigger")).to_have_value(SCHEMA_TRIGGER)
+    expect(page.locator("#verifier-token")).to_have_value(SCHEMA_TOKEN)
+    expect(page.locator("#verifier-headers")).to_have_value(SCHEMA_HEADER_LINES)
     expect(page.get_by_role("link", name=ACTIVE_CONTRACT)).to_be_visible()
     expect(page.get_by_text(format_timestamp(ACTIVE_VERIFIED_AT))).to_be_visible()
 
     page.locator("#verifier-name").fill("Payload schema")
     page.locator("#verifier-version").fill("4")
     page.locator("#verifier-active").select_option("false")
-    page.locator("#verifier-trigger").fill("gitlab:payload-schema")
+    page.locator("#verifier-trigger").fill("https://ci.example/jobs/payload-schema")
+    page.locator("#verifier-token").fill("payload-token")
+    page.locator("#verifier-headers").fill("Accept: application/json\nX-Job: payload")
     page.locator("#save-verifier").click()
 
     expect(page.locator(".flash")).to_have_text("Verifier saved.")
     expect(page.locator("#verifier-name")).to_have_value("Payload schema")
     expect(page.locator("#verifier-version")).to_have_value("4")
     expect(page.locator("#verifier-active")).to_have_value("false")
-    expect(page.locator("#verifier-trigger")).to_have_value("gitlab:payload-schema")
+    expect(page.locator("#verifier-trigger")).to_have_value("https://ci.example/jobs/payload-schema")
+    expect(page.locator("#verifier-token")).to_have_value("payload-token")
+    expect(page.locator("#verifier-headers")).to_have_value("Accept: application/json\nX-Job: payload")
 
     page.locator("nav").get_by_role("link", name="Verifiers").click()
-    expect(page.locator("tr[data-verifier-name='Payload schema']")).to_have_attribute("data-active", "no")
-    expect(page.locator("tr[data-verifier-name='Payload schema']")).to_contain_text("gitlab:payload-schema")
+    saved = page.locator("tr[data-verifier-name='Payload schema']")
+    expect(saved).to_have_attribute("data-active", "no")
+    expect(saved).to_have_attribute("data-token", "payload-token")
+    expect(saved).to_contain_text("https://ci.example/jobs/payload-schema")
+    expect(saved).to_contain_text("X-Job: payload")
 
 
 def test_log_out_returns_to_the_login_page(page: Page, base_url: str):

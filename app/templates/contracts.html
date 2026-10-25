@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Contracts · Contract Tester{% endblock %}
 {% block content %}
-<h1>Contracts</h1>
-<p class="lede">Contracts defined for {{ organization_name }}.</p>
+<div class="page-head">
+  <div>
+    <h1>Contracts</h1>
+    <p class="lede">Contracts defined for {{ organization_name }}.</p>
+  </div>
+  <a class="button" id="new-contract" href="/contracts/new">New contract</a>
+</div>
 {% if contracts %}
 <div class="table-wrap">
   <table class="stack-rows">
@@ -12,6 +17,7 @@
         <th scope="col">Name</th>
         <th scope="col">Publisher</th>
         <th scope="col">Active verifiers</th>
+        <th scope="col">Actions</th>
       </tr>
     </thead>
     <tbody id="contracts">
@@ -20,6 +26,12 @@
         <td data-label="Name"><a href="/contracts/{{ contract.id }}">{{ contract.name }}</a></td>
         <td data-label="Publisher">{{ contract.publisher_name }}</td>
         <td data-label="Active verifiers"><span class="pill {{ 'yes' if contract.has_active_verifiers else 'no' }}">{{ "Yes" if contract.has_active_verifiers else "No" }}</span></td>
+        <td data-label="Actions">
+          <div class="row-actions">
+            <a href="/contracts/{{ contract.id }}/edit">Edit</a>
+            <a href="/contracts/{{ contract.id }}/remove">Delete</a>
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

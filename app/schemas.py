@@ -1,7 +1,9 @@
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.triggers import clean_header_name, clean_header_pairs, clean_header_value, clean_http_url, clean_token
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -149,12 +151,29 @@ class StatementRemoval(BaseModel):
     contract: ContractOut
 
 
+class VerificationHeader(BaseModel):
+    name: str
+    value: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return clean_header_name(value)
+
+    @field_validator("value")
+    @classmethod
+    def clean_value(cls, value: str) -> str:
+        return clean_header_value(value)
+
+
 class VerifierWrite(BaseModel):
     statement_id: int
     name: str
     version: int
     active: bool = True
     verification_trigger: str
+    verification_token: str = ""
+    verification_headers: list[VerificationHeader] = Field(default_factory=list)
     last_verified_at: datetime | None = None
 
     @field_validator("name")
@@ -165,7 +184,17 @@ class VerifierWrite(BaseModel):
     @field_validator("verification_trigger")
     @classmethod
     def clean_trigger(cls, value: str) -> str:
-        return required_text(value, "Verification trigger", 500)
+        return clean_http_url(value)
+
+    @field_validator("verification_token")
+    @classmethod
+    def clean_verification_token(cls, value: str) -> str:
+        return clean_token(value)
+
+    @model_validator(mode="after")
+    def unique_headers(self) -> "VerifierWrite":
+        clean_header_pairs([(item.name, item.value) for item in self.verification_headers])
+        return self
 
 
 class VerifierOut(BaseModel):
@@ -177,6 +206,8 @@ class VerifierOut(BaseModel):
     version: int
     active: bool
     verification_trigger: str
+    verification_token: str
+    verification_headers: list[VerificationHeader]
     last_verified_at: datetime | None
 
 

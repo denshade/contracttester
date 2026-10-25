@@ -40,8 +40,18 @@
     </div>
     <div class="field">
       <label for="verifier-trigger">Verification trigger</label>
-      <input id="verifier-trigger" name="verification_trigger" type="text" value="{{ trigger_value }}" required>
-      <p class="muted">The job that runs this verifier. The version is passed to that job.</p>
+      <input id="verifier-trigger" name="verification_trigger" type="url" value="{{ trigger_value }}" required>
+      <p class="muted">The URL called to start this verifier. The contract version is passed as a parameter.</p>
+    </div>
+    <div class="field">
+      <label for="verifier-token">Token</label>
+      <input id="verifier-token" name="verification_token" type="text" value="{{ token_value }}" autocomplete="off">
+      <p class="muted">Sent with the call. Leave this blank when the URL does not need a token.</p>
+    </div>
+    <div class="field">
+      <label for="verifier-headers">Headers</label>
+      <textarea id="verifier-headers" name="verification_headers">{{ headers_value }}</textarea>
+      <p class="muted">One header per line, as Name: Value. These are sent with the call.</p>
     </div>
     <div>
       <button class="button" id="save-verifier" type="submit">Save verifier</button>

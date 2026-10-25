@@ -119,7 +119,9 @@ class Verifier(Base):
     name: Mapped[str] = mapped_column(String(200))
     version: Mapped[int] = mapped_column()
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    verification_trigger: Mapped[str] = mapped_column(String(500), default="")
+    verification_trigger: Mapped[str] = mapped_column(String(2000), default="")
+    verification_token: Mapped[str] = mapped_column(String(500), default="")
+    verification_headers_json: Mapped[str] = mapped_column("verification_headers", Text, default="[]")
     last_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     statement: Mapped[Statement] = relationship(back_populates="verifiers")
@@ -128,6 +130,12 @@ class Verifier(Base):
         cascade="all, delete-orphan",
         order_by="VerifierTest.id",
     )
+
+    @property
+    def verification_headers(self) -> list[dict[str, str]]:
+        from app.triggers import load_headers
+
+        return [{"name": name, "value": value} for name, value in load_headers(self.verification_headers_json)]
 
 
 class VerifierTest(Base):

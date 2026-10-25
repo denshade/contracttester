@@ -107,7 +107,9 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
             "name": "Shape",
             "version": 1,
             "active": True,
-            "verification_trigger": "gitlab:shape",
+            "verification_trigger": "https://ci.example/jobs/shape",
+            "verification_token": "shape-token",
+            "verification_headers": [{"name": "Accept", "value": "application/json"}],
             "last_verified_at": "2026-10-20T15:30:00Z",
         },
     )
@@ -141,7 +143,9 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
     assert copied_verifier["id"] != verifier.json()["id"]
     assert copied_verifier["name"] == "Shape"
     assert copied_verifier["active"] is True
-    assert copied_verifier["verification_trigger"] == "gitlab:shape"
+    assert copied_verifier["verification_trigger"] == "https://ci.example/jobs/shape"
+    assert copied_verifier["verification_token"] == "shape-token"
+    assert copied_verifier["verification_headers"] == [{"name": "Accept", "value": "application/json"}]
     assert copied_verifier["last_verified_at"].startswith("2026-10-20T15:30:00")
     assert _verifiers(api, fresh["id"]) == []
     copied_tests = [item for item in api.get("/api/tests").json() if item["verifier_id"] == copied_verifier["id"]]
@@ -243,7 +247,9 @@ def test_verifier_and_test_crud_and_overview_flag(api):
             "name": "Yard schema",
             "version": 4,
             "active": True,
-            "verification_trigger": "gitlab:yard",
+            "verification_trigger": "https://ci.example/jobs/yard",
+            "verification_token": "yard-token",
+            "verification_headers": [{"name": "X-Job", "value": "yard"}],
         },
     )
     assert verifier.status_code == 201
@@ -258,7 +264,8 @@ def test_verifier_and_test_crud_and_overview_flag(api):
             "name": "Yard schema",
             "version": 5,
             "active": False,
-            "verification_trigger": "gitlab:yard",
+            "verification_trigger": "https://ci.example/jobs/yard",
+            "verification_token": "yard-token",
             "last_verified_at": None,
         },
     )

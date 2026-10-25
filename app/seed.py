@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Company, Contract, Publisher, Statement, User, Verifier, VerifierTest
+from app.triggers import dump_headers, parse_header_block
 
 COMPANY_NAME = "Harbor & Co."
 ACTIVE_CONTRACT = "Bill of Lading"
@@ -21,9 +22,18 @@ DOCK_PUBLISHER = "North Quay"
 ACTIVE_VERIFIER = "Schema shape"
 LEGACY_VERIFIER = "Legacy checksum"
 DOCK_VERIFIER = "Window check"
-SCHEMA_TRIGGER = "gitlab:schema-shape"
-LEGACY_TRIGGER = "gitlab:legacy-checksum"
-DOCK_TRIGGER = "gitlab:dock-window"
+SCHEMA_TRIGGER = "https://gitlab.example/api/v4/projects/harbor/trigger/pipeline"
+SCHEMA_TOKEN = "glptt-schema-shape"
+SCHEMA_HEADER_LINES = "Accept: application/json"
+SCHEMA_HEADER_JSON = dump_headers(parse_header_block(SCHEMA_HEADER_LINES))
+LEGACY_TRIGGER = "https://gitlab.example/api/v4/projects/harbor/trigger/legacy"
+LEGACY_TOKEN = "glptt-legacy-checksum"
+LEGACY_HEADER_LINES = ""
+LEGACY_HEADER_JSON = dump_headers(parse_header_block(LEGACY_HEADER_LINES))
+DOCK_TRIGGER = "https://ci.example/jobs/dock-window"
+DOCK_TOKEN = "dock-window-token"
+DOCK_HEADER_LINES = "X-Job: dock-window"
+DOCK_HEADER_JSON = dump_headers(parse_header_block(DOCK_HEADER_LINES))
 ACTIVE_VERIFIED_AT = datetime(2026, 10, 20, 15, 30, tzinfo=timezone.utc)
 LEGACY_VERIFIED_AT = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
 SCHEMA_TEST = "status is present"
@@ -53,7 +63,7 @@ def seed_if_empty(db: Session) -> None:
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
-                [_verifier(LEGACY_VERIFIER, 1, False, LEGACY_VERIFIED_AT, LEGACY_TRIGGER, [LEGACY_TEST])],
+                [_verifier(LEGACY_VERIFIER, 1, False, LEGACY_VERIFIED_AT, LEGACY_TRIGGER, LEGACY_TOKEN, LEGACY_HEADER_LINES, [LEGACY_TEST])],
             )
         ],
     )
@@ -67,7 +77,7 @@ def seed_if_empty(db: Session) -> None:
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
-                [_verifier(ACTIVE_VERIFIER, 1, True, ACTIVE_VERIFIED_AT, SCHEMA_TRIGGER, [SCHEMA_TEST])],
+                [_verifier(ACTIVE_VERIFIER, 1, True, ACTIVE_VERIFIED_AT, SCHEMA_TRIGGER, SCHEMA_TOKEN, SCHEMA_HEADER_LINES, [SCHEMA_TEST])],
             ),
             _statement(BILL_POST, BILL_POST_STATE, BILL_POST_PAYLOAD, []),
         ],
@@ -82,7 +92,7 @@ def seed_if_empty(db: Session) -> None:
                 DOCK_POST,
                 DOCK_STATE,
                 DOCK_PAYLOAD,
-                [_verifier(DOCK_VERIFIER, 3, False, None, DOCK_TRIGGER, [DOCK_TEST])],
+                [_verifier(DOCK_VERIFIER, 3, False, None, DOCK_TRIGGER, DOCK_TOKEN, DOCK_HEADER_LINES, [DOCK_TEST])],
             )
         ],
     )
@@ -96,6 +106,8 @@ def _verifier(
     active: bool,
     last_verified_at: datetime | None,
     verification_trigger: str,
+    verification_token: str,
+    header_lines: str,
     tests: list[str],
 ) -> Verifier:
     verifier = Verifier(
@@ -103,6 +115,8 @@ def _verifier(
         version=version,
         active=active,
         verification_trigger=verification_trigger,
+        verification_token=verification_token,
+        verification_headers_json=dump_headers(parse_header_block(header_lines)),
         last_verified_at=last_verified_at,
     )
     for test_name in tests:

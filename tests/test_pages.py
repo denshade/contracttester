@@ -22,6 +22,8 @@ from app.seed import (
     LEGACY_TRIGGER,
     LEGACY_VERIFIED_AT,
     LEGACY_VERIFIER,
+    SCHEMA_HEADER_LINES,
+    SCHEMA_TOKEN,
     SCHEMA_TRIGGER,
 )
 
@@ -88,6 +90,88 @@ def test_contracts_overview_shows_active_verifier_state(auth_client):
     assert bill and dock
 
 
+def test_contracts_can_be_created_edited_and_deleted(auth_client):
+    listing = auth_client.get("/contracts")
+    assert 'id="new-contract"' in listing.text
+    bill = re.search(
+        rf'data-contract-name="{ACTIVE_CONTRACT}" data-contract-id="(\d+)" data-active="yes"',
+        listing.text,
+    )
+    assert bill
+    assert f'href="/contracts/{bill.group(1)}"' in listing.text
+    assert f'href="/contracts/{bill.group(1)}/edit"' in listing.text
+    assert f'href="/contracts/{bill.group(1)}/remove"' in listing.text
+
+    invalid = auth_client.post(
+        "/contracts",
+        data={"name": "   ", "publisher_name": "Desk"},
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 400
+    assert "Name is required" in invalid.text
+
+    created = auth_client.post(
+        "/contracts",
+        data={"name": "Parcel", "publisher_name": "Desk"},
+        follow_redirects=True,
+    )
+    assert "Contract created." in created.text
+    parcel = re.search(r'data-contract-name="Parcel" data-contract-id="(\d+)" data-active="no"', created.text)
+    assert parcel
+    assert 'data-publisher="Desk"' in created.text
+
+    duplicate = auth_client.post(
+        "/contracts",
+        data={"name": "Parcel", "publisher_name": "Other"},
+        follow_redirects=False,
+    )
+    assert duplicate.status_code == 409
+    assert "A contract with this name already exists" in duplicate.text
+
+    detail = auth_client.get(f"/contracts/{parcel.group(1)}")
+    assert detail.status_code == 200
+    assert "Version 1" in detail.text
+    assert "This version has no statements." in detail.text
+
+    clash = auth_client.post(
+        f"/contracts/{parcel.group(1)}/edit",
+        data={"name": ACTIVE_CONTRACT, "publisher_name": "Desk"},
+        follow_redirects=False,
+    )
+    assert clash.status_code == 409
+
+    edited = auth_client.post(
+        f"/contracts/{parcel.group(1)}/edit",
+        data={"name": "Parcel API", "publisher_name": "Pier Office"},
+        follow_redirects=True,
+    )
+    assert "Contract saved." in edited.text
+    assert 'data-contract-name="Parcel API"' in edited.text
+    assert 'data-publisher="Pier Office"' in edited.text
+    assert 'data-contract-name="Parcel"' not in edited.text
+
+    deleted = auth_client.post(f"/contracts/{parcel.group(1)}/remove", follow_redirects=True)
+    assert "Contract deleted." in deleted.text
+    assert 'data-contract-name="Parcel API"' not in deleted.text
+    assert f'data-contract-name="{ACTIVE_CONTRACT}"' in deleted.text
+
+    renamed = auth_client.post(
+        f"/contracts/{bill.group(1)}/edit",
+        data={"name": "Bills", "publisher_name": "Pier Office"},
+        follow_redirects=True,
+    )
+    assert 'data-contract-name="Bills"' in renamed.text
+    assert 'data-publisher="Pier Office"' in renamed.text
+    current = auth_client.get(f"/contracts/{bill.group(1)}")
+    assert "<h1>Bills</h1>" in current.text
+    assert 'value="Pier Office"' in current.text
+    version_one = re.search(r'data-version="1".*?href="(/contracts/\d+)"', current.text, re.S)
+    assert version_one
+    older = auth_client.get(version_one.group(1))
+    assert "<h1>Bills</h1>" in older.text
+    assert f'value="{BILL_PUBLISHER}"' in older.text
+
+
 def test_contract_details_versions_statements_and_removal(auth_client):
     overview = auth_client.get("/contracts")
     bill = re.search(
@@ -137,12 +221,12 @@ def test_contract_details_versions_statements_and_removal(auth_client):
 
     confirm = auth_client.get(f"/contracts/{bill.group(1)}/remove")
     assert confirm.status_code == 200
-    assert f"Are you sure you want to remove {ACTIVE_CONTRACT}?" in confirm.text
+    assert f"Are you sure you want to delete {ACTIVE_CONTRACT}?" in confirm.text
     assert auth_client.get("/contracts").text.count(f'data-contract-name="{ACTIVE_CONTRACT}"') == 1
 
     removed = auth_client.post(f"/contracts/{bill.group(1)}/remove", follow_redirects=True)
     assert removed.status_code == 200
-    assert "Contract removed." in removed.text
+    assert "Contract deleted." in removed.text
     assert f'data-contract-name="{ACTIVE_CONTRACT}"' not in removed.text
     assert f'data-contract-name="{INACTIVE_CONTRACT}"' in removed.text
     assert auth_client.get(f"/contracts/{bill.group(1)}").status_code == 404
@@ -168,6 +252,8 @@ def test_verifier_list_and_editable_details(auth_client):
     assert BILL_GET in detail.text
     assert format_timestamp(ACTIVE_VERIFIED_AT) in detail.text
     assert f'value="{SCHEMA_TRIGGER}"' in detail.text
+    assert f'value="{SCHEMA_TOKEN}"' in detail.text
+    assert SCHEMA_HEADER_LINES in detail.text
 
     invalid = auth_client.post(
         f"/verifiers/{schema.group(1)}",
@@ -182,13 +268,45 @@ def test_verifier_list_and_editable_details(auth_client):
     assert invalid.status_code == 400
     assert "Version must be a whole number" in invalid.text
 
-    saved = auth_client.post(
+    rejected = auth_client.post(
         f"/verifiers/{schema.group(1)}",
         data={
             "name": "Payload schema",
             "version": "4",
             "active": "false",
             "verification_trigger": "gitlab:payload-schema",
+            "verification_token": "payload-token",
+            "verification_headers": "Accept: application/json",
+        },
+        follow_redirects=False,
+    )
+    assert rejected.status_code == 400
+    assert "http or https URL" in rejected.text
+
+    broken_header = auth_client.post(
+        f"/verifiers/{schema.group(1)}",
+        data={
+            "name": ACTIVE_VERIFIER,
+            "version": "1",
+            "active": "true",
+            "verification_trigger": SCHEMA_TRIGGER,
+            "verification_token": SCHEMA_TOKEN,
+            "verification_headers": "Not a header",
+        },
+        follow_redirects=False,
+    )
+    assert broken_header.status_code == 400
+    assert "Each header must look like Name: Value" in broken_header.text
+
+    saved = auth_client.post(
+        f"/verifiers/{schema.group(1)}",
+        data={
+            "name": "Payload schema",
+            "version": "4",
+            "active": "false",
+            "verification_trigger": "https://ci.example/jobs/payload-schema",
+            "verification_token": "payload-token",
+            "verification_headers": "Accept: application/json\nX-Job: payload",
         },
         follow_redirects=True,
     )
@@ -196,7 +314,9 @@ def test_verifier_list_and_editable_details(auth_client):
     assert 'value="Payload schema"' in saved.text
     assert 'value="4"' in saved.text
     assert 'value="false" selected' in saved.text
-    assert 'value="gitlab:payload-schema"' in saved.text
+    assert 'value="https://ci.example/jobs/payload-schema"' in saved.text
+    assert 'value="payload-token"' in saved.text
+    assert "X-Job: payload" in saved.text
 
     refreshed = auth_client.get("/verifiers")
     assert 'data-verifier-name="Payload schema" data-verifier-id="' in refreshed.text

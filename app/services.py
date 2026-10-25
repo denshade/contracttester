@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.errors import DomainError
 from app.formatting import format_timestamp
 from app.models import Company, Contract, Publisher, Statement, User, Verifier, VerifierTest
+from app.triggers import clean_http_url, clean_token, dump_headers, format_headers, load_headers, parse_header_block
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -45,6 +46,8 @@ class VerifierSummary:
     version: int
     active: bool
     verification_trigger: str
+    verification_token: str
+    headers_text: str
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,8 @@ class VerifierDetail:
     version: int
     active: bool
     verification_trigger: str
+    verification_token: str
+    headers_text: str
     contract_id: int
     contract_name: str
     contract_version: int
@@ -103,6 +108,25 @@ def _clean_name(value: str, label: str = "Name", max_length: int = 200) -> str:
     if len(cleaned) > max_length:
         raise DomainError(400, f"{label} must be at most {max_length} characters")
     return cleaned
+
+
+def _checked(func, *args):
+    try:
+        return func(*args)
+    except ValueError as exc:
+        raise DomainError(400, str(exc)) from exc
+
+
+def _headers_json_from_text(value: str) -> str:
+    return dump_headers(_checked(parse_header_block, value))
+
+
+def _headers_json_from_pairs(headers: list) -> str:
+    return dump_headers([(item.name, item.value) for item in headers])
+
+
+def _headers_text(verifier: Verifier) -> str:
+    return format_headers(load_headers(verifier.verification_headers_json))
 
 
 def _clean_email(value: str) -> str:
@@ -242,6 +266,27 @@ def create_contract(db: Session, company_id: int, name: str, publisher_name: str
                 payload=payload,
             )
         )
+    _commit(db)
+    db.refresh(contract)
+    return contract
+
+
+def update_contract_fields(db: Session, contract: Contract, name: str, publisher_name: str) -> Contract:
+    name = _clean_name(name, "Name")
+    publisher_name = _clean_name(publisher_name, "Publisher name")
+    if name != contract.name:
+        if db.scalar(select(Contract.id).where(Contract.name == name).limit(1)) is not None:
+            raise DomainError(409, "A contract with this name already exists")
+        members = db.scalars(
+            select(Contract).where(Contract.company_id == contract.company_id, Contract.name == contract.name)
+        ).all()
+        for member in members:
+            member.name = name
+    publisher = contract.publisher
+    if publisher is None:
+        db.add(Publisher(contract=contract, name=publisher_name))
+    else:
+        publisher.name = publisher_name
     _commit(db)
     db.refresh(contract)
     return contract
@@ -387,6 +432,8 @@ def verifier_catalog(db: Session, company_id: int) -> list[VerifierSummary]:
             version=verifier.version,
             active=verifier.active,
             verification_trigger=verifier.verification_trigger,
+            verification_token=verifier.verification_token,
+            headers_text=_headers_text(verifier),
         )
         for verifier in verifiers
     ]
@@ -402,6 +449,8 @@ def verifier_page(db: Session, company_id: int, verifier_id: int) -> VerifierDet
         version=verifier.version,
         active=verifier.active,
         verification_trigger=verifier.verification_trigger,
+        verification_token=verifier.verification_token,
+        headers_text=_headers_text(verifier),
         contract_id=contract.id,
         contract_name=contract.name,
         contract_version=contract.version,
@@ -417,6 +466,8 @@ def update_verifier_attributes(
     version: str,
     active: bool,
     verification_trigger: str,
+    verification_token: str,
+    verification_headers: str,
 ) -> Verifier:
     try:
         parsed_version = int(version)
@@ -425,7 +476,9 @@ def update_verifier_attributes(
     verifier.name = _clean_name(name, "Verifier name")
     verifier.version = parsed_version
     verifier.active = active
-    verifier.verification_trigger = _clean_name(verification_trigger, "Verification trigger", 500)
+    verifier.verification_trigger = _checked(clean_http_url, verification_trigger)
+    verifier.verification_token = _checked(clean_token, verification_token)
+    verifier.verification_headers_json = _headers_json_from_text(verification_headers)
     _commit(db)
     db.refresh(verifier)
     return verifier
@@ -439,6 +492,8 @@ def create_verifier(
     version: int,
     active: bool,
     verification_trigger: str,
+    verification_token: str,
+    verification_headers: list,
     last_verified_at,
 ) -> Verifier:
     statement = get_statement(db, company_id, statement_id)
@@ -447,7 +502,9 @@ def create_verifier(
         name=_clean_name(name, "Verifier name"),
         version=version,
         active=active,
-        verification_trigger=_clean_name(verification_trigger, "Verification trigger", 500),
+        verification_trigger=_checked(clean_http_url, verification_trigger),
+        verification_token=_checked(clean_token, verification_token),
+        verification_headers_json=_headers_json_from_pairs(verification_headers),
         last_verified_at=last_verified_at,
     )
     db.add(verifier)
@@ -465,6 +522,8 @@ def update_verifier(
     version: int,
     active: bool,
     verification_trigger: str,
+    verification_token: str,
+    verification_headers: list,
     last_verified_at,
 ) -> Verifier:
     statement = get_statement(db, company_id, statement_id)
@@ -472,7 +531,9 @@ def update_verifier(
     verifier.name = _clean_name(name, "Verifier name")
     verifier.version = version
     verifier.active = active
-    verifier.verification_trigger = _clean_name(verification_trigger, "Verification trigger", 500)
+    verifier.verification_trigger = _checked(clean_http_url, verification_trigger)
+    verifier.verification_token = _checked(clean_token, verification_token)
+    verifier.verification_headers_json = _headers_json_from_pairs(verification_headers)
     verifier.last_verified_at = last_verified_at
     _commit(db)
     db.refresh(verifier)
@@ -746,6 +807,8 @@ def _copy_statement(db: Session, source: Statement, target: Contract) -> None:
             version=verifier.version,
             active=verifier.active,
             verification_trigger=verifier.verification_trigger,
+            verification_token=verifier.verification_token,
+            verification_headers_json=verifier.verification_headers_json,
             last_verified_at=verifier.last_verified_at,
         )
         db.add(verifier_copy)

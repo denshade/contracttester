@@ -172,6 +172,8 @@ def create_verifier(body: VerifierWrite, db: Db, company: CurrentCompany) -> obj
         body.version,
         body.active,
         body.verification_trigger,
+        body.verification_token,
+        body.verification_headers,
         body.last_verified_at,
     )
 
@@ -193,6 +195,8 @@ def update_verifier(verifier_id: int, body: VerifierWrite, db: Db, company: Curr
         body.version,
         body.active,
         body.verification_trigger,
+        body.verification_token,
+        body.verification_headers,
         body.last_verified_at,
     )
 

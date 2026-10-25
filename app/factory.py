@@ -7,7 +7,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.database import ensure_publisher_name, ensure_verifier_trigger, make_engine, make_session_factory
+from app.database import (
+    ensure_publisher_name,
+    ensure_verifier_call,
+    ensure_verifier_trigger,
+    make_engine,
+    make_session_factory,
+)
 from app.errors import DomainError, LoginRequired
 from app.models import Base
 from app.routers import api, pages
@@ -28,6 +34,7 @@ def create_app(database_url: str | None = None, *, seed: bool = True) -> FastAPI
     session_factory = make_session_factory(engine)
     Base.metadata.create_all(engine)
     ensure_verifier_trigger(engine)
+    ensure_verifier_call(engine)
     ensure_publisher_name(engine)
     if seed:
         with session_factory() as db:
