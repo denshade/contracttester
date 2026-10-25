@@ -16,7 +16,7 @@ from app.seed import (
     ACTIVE_CONTRACT,
     ACTIVE_VERIFIED_AT,
     ACTIVE_VERIFIER,
-    BILL_POST,
+    BILL_POST_OUTCOME,
     BILL_PUBLISHER,
     BILL_POST_PAYLOAD,
     BILL_POST_STATE,
@@ -145,6 +145,38 @@ def test_contracts_can_be_created_edited_and_deleted(page: Page, base_url: str):
     expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_count(1)
 
 
+def test_adding_a_statement_opens_the_next_version(page: Page, base_url: str):
+    _sign_in(page, base_url)
+    page.get_by_role("link", name=ACTIVE_CONTRACT).click()
+    expect(page.locator(".lede")).to_have_text("Version 2")
+    expect(page.locator("#add-statement")).to_be_visible()
+
+    page.locator("#statement-verb").select_option("POST")
+    page.locator("#statement-trigger").fill("/receipts")
+    page.locator("#statement-state").fill("202 Accepted")
+    page.locator("#statement-payload").fill('{"ok":true}')
+    page.locator("#statement-outcome").fill("The receipt is stored")
+    page.locator("#statement-headers").fill("Location: /receipts/1")
+    page.locator("#add-statement").click()
+
+    expect(page.locator(".flash")).to_have_text("Statement added.")
+    expect(page.locator(".lede")).to_have_text("Version 3")
+    expect(page.locator("tr[data-version='3']")).to_have_attribute("data-current", "true")
+    added = page.locator("tr[data-verb='POST'][data-trigger='/receipts']")
+    expect(added).to_contain_text("202 Accepted")
+    expect(added).to_contain_text('{"ok":true}')
+    expect(added).to_contain_text("The receipt is stored")
+    expect(added).to_contain_text("Location: /receipts/1")
+    expect(page.locator("tr[data-verb='POST'][data-trigger='/bills']")).to_be_visible()
+
+    page.locator("tr[data-version='2'] a").click()
+    expect(page.locator(".lede")).to_have_text("Version 2")
+    expect(page.locator("tr[data-verb='POST'][data-trigger='/bills']")).to_be_visible()
+    expect(page.locator("tr[data-trigger='/receipts']")).to_have_count(0)
+    expect(page.locator("#add-statement")).to_have_count(0)
+    expect(page.locator("#statements-latest-only")).to_be_visible()
+
+
 def test_contract_page_shows_versions_verifiers_and_statements(page: Page, base_url: str):
     _sign_in(page, base_url)
     page.get_by_role("link", name=ACTIVE_CONTRACT).click()
@@ -159,11 +191,11 @@ def test_contract_page_shows_versions_verifiers_and_statements(page: Page, base_
     expect(active).to_contain_text(format_timestamp(ACTIVE_VERIFIED_AT))
     expect(active).to_contain_text("GET /bills/{id}")
 
-    statements = page.locator("#statements")
-    expect(statements).to_contain_text(BILL_POST)
-    expect(statements).to_contain_text(BILL_POST_STATE)
-    expect(statements).to_contain_text(BILL_POST_PAYLOAD)
-    expect(statements).to_contain_text(f"{ACTIVE_VERIFIER} v1 · {format_timestamp(ACTIVE_VERIFIED_AT)}")
+    post = page.locator("tr[data-verb='POST'][data-trigger='/bills']")
+    expect(post).to_contain_text(BILL_POST_STATE)
+    expect(post).to_contain_text(BILL_POST_PAYLOAD)
+    expect(post).to_contain_text(BILL_POST_OUTCOME)
+    expect(page.locator("#statements")).to_contain_text(f"{ACTIVE_VERIFIER} v1 · {format_timestamp(ACTIVE_VERIFIED_AT)}")
 
 
 def test_older_version_shows_its_own_verifier(page: Page, base_url: str):

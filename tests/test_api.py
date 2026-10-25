@@ -88,7 +88,16 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
         json={
             "name": "Orders",
             "publisher_name": "Desk",
-            "statements": [{"trigger": "GET /orders", "expected_state": "200 OK", "payload": ""}],
+            "statements": [
+                {
+                    "verb": "GET",
+                    "trigger": "/orders",
+                    "state": "200 OK",
+                    "payload": "",
+                    "expected_outcome": "The order is returned",
+                    "expected_headers": [{"name": "Content-Type", "value": "application/json"}],
+                }
+            ],
         },
     )
     assert created.status_code == 201
@@ -121,9 +130,11 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
         "/api/statements",
         json={
             "contract_id": first["id"],
-            "trigger": "POST /orders",
-            "expected_state": "201 Created",
+            "verb": "POST",
+            "trigger": "/orders",
+            "state": "201 Created",
             "payload": '{"a": 1}',
+            "expected_outcome": "The order is stored",
         },
     )
     assert added.status_code == 201
@@ -132,13 +143,17 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
     assert created_statement["contract_id"] != first["id"]
 
     assert [item["version"] for item in _versions(api, "Orders")] == [1, 2]
-    assert [item["trigger"] for item in _statements(api, first["id"])] == ["GET /orders"]
+    assert [(item["verb"], item["trigger"]) for item in _statements(api, first["id"])] == [("GET", "/orders")]
+    assert _statements(api, first["id"])[0]["expected_headers"] == [{"name": "Content-Type", "value": "application/json"}]
     assert _verifiers(api, original["id"])[0]["id"] == verifier.json()["id"]
 
     second_id = created_statement["contract_id"]
     assert next(item for item in api.get("/api/contracts").json() if item["id"] == second_id)["publisher_name"] == "Desk"
-    copied = next(item for item in _statements(api, second_id) if item["trigger"] == "GET /orders")
-    fresh = next(item for item in _statements(api, second_id) if item["trigger"] == "POST /orders")
+    copied = next(item for item in _statements(api, second_id) if item["verb"] == "GET")
+    fresh = next(item for item in _statements(api, second_id) if item["verb"] == "POST")
+    assert copied["trigger"] == "/orders"
+    assert copied["expected_outcome"] == "The order is returned"
+    assert copied["expected_headers"] == [{"name": "Content-Type", "value": "application/json"}]
     copied_verifier = _verifiers(api, copied["id"])[0]
     assert copied_verifier["id"] != verifier.json()["id"]
     assert copied_verifier["name"] == "Shape"
@@ -154,12 +169,19 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
 
     updated = api.put(
         f"/api/statements/{original['id']}",
-        json={"trigger": "GET /orders", "expected_state": "200 OK", "payload": '{"changed":true}'},
+        json={
+            "verb": "GET",
+            "trigger": "/orders",
+            "state": "200 OK",
+            "payload": '{"changed":true}',
+            "expected_outcome": "The order is returned",
+            "expected_headers": [{"name": "Content-Type", "value": "application/json"}],
+        },
     )
     assert updated.status_code == 200
     assert [item["version"] for item in _versions(api, "Orders")] == [1, 2]
     assert _statements(api, first["id"])[0]["payload"] == '{"changed":true}'
-    assert next(item for item in _statements(api, second_id) if item["trigger"] == "GET /orders")["payload"] == ""
+    assert next(item for item in _statements(api, second_id) if item["verb"] == "GET")["payload"] == ""
 
     removed = api.delete(f"/api/statements/{fresh['id']}")
     assert removed.status_code == 200
@@ -168,16 +190,18 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
     assert body["contract"]["version"] == 3
     assert api.get(f"/api/statements/{fresh['id']}").status_code == 200
     third_id = body["contract"]["id"]
-    assert all(item["trigger"] != "POST /orders" for item in _statements(api, third_id))
-    assert any(item["trigger"] == "POST /orders" for item in _statements(api, second_id))
+    assert all(item["verb"] != "POST" for item in _statements(api, third_id))
+    assert any(item["verb"] == "POST" for item in _statements(api, second_id))
 
     rejected_add = api.post(
         "/api/statements",
         json={
             "contract_id": first["id"],
-            "trigger": "DELETE /orders",
-            "expected_state": "204 No Content",
+            "verb": "DELETE",
+            "trigger": "/orders",
+            "state": "204 No Content",
             "payload": "",
+            "expected_outcome": "The order is removed",
         },
     )
     assert rejected_add.status_code == 409
@@ -196,12 +220,27 @@ def test_rename_keeps_the_version_family_together(api):
         json={
             "name": "Parcel",
             "publisher_name": "Desk",
-            "statements": [{"trigger": "GET /parcels", "expected_state": "200 OK", "payload": ""}],
+            "statements": [
+                {
+                    "verb": "GET",
+                    "trigger": "/parcels",
+                    "state": "200 OK",
+                    "payload": "",
+                    "expected_outcome": "The parcel is returned",
+                }
+            ],
         },
     ).json()
     api.post(
         "/api/statements",
-        json={"contract_id": created["id"], "trigger": "POST /parcels", "expected_state": "201 Created", "payload": "{}"},
+        json={
+            "contract_id": created["id"],
+            "verb": "POST",
+            "trigger": "/parcels",
+            "state": "201 Created",
+            "payload": "{}",
+            "expected_outcome": "The parcel is stored",
+        },
     )
     renamed = api.put(f"/api/contracts/{created['id']}", json={"name": "Parcel API"})
     assert renamed.status_code == 200
@@ -215,12 +254,27 @@ def test_delete_one_version_keeps_the_others(api):
         json={
             "name": "Crates",
             "publisher_name": "Desk",
-            "statements": [{"trigger": "GET /crates", "expected_state": "200 OK", "payload": ""}],
+            "statements": [
+                {
+                    "verb": "GET",
+                    "trigger": "/crates",
+                    "state": "200 OK",
+                    "payload": "",
+                    "expected_outcome": "The crate is returned",
+                }
+            ],
         },
     ).json()
     added = api.post(
         "/api/statements",
-        json={"contract_id": created["id"], "trigger": "POST /crates", "expected_state": "201 Created", "payload": "{}"},
+        json={
+            "contract_id": created["id"],
+            "verb": "POST",
+            "trigger": "/crates",
+            "state": "201 Created",
+            "payload": "{}",
+            "expected_outcome": "The crate is stored",
+        },
     ).json()
     assert api.delete(f"/api/contracts/{created['id']}").status_code == 204
     assert api.get(f"/api/contracts/{created['id']}").status_code == 404
@@ -236,7 +290,15 @@ def test_verifier_and_test_crud_and_overview_flag(api):
         json={
             "name": "Yard Check",
             "publisher_name": "Desk",
-            "statements": [{"trigger": "GET /yard", "expected_state": "200 OK", "payload": "{}"}],
+            "statements": [
+                {
+                    "verb": "GET",
+                    "trigger": "/yard",
+                    "state": "200 OK",
+                    "payload": "{}",
+                    "expected_outcome": "The yard is open",
+                }
+            ],
         },
     ).json()
     statement = _statements(api, created["id"])[0]

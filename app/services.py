@@ -15,8 +15,17 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.errors import DomainError
 from app.formatting import format_timestamp
+from app.http_methods import clean_verb
 from app.models import Company, Contract, Publisher, Statement, User, Verifier, VerifierTest
-from app.triggers import clean_http_url, clean_token, dump_headers, format_headers, load_headers, parse_header_block
+from app.triggers import (
+    clean_header_pairs,
+    clean_http_url,
+    clean_token,
+    dump_headers,
+    format_headers,
+    load_headers,
+    parse_header_block,
+)
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -68,9 +77,12 @@ class VerifierDetail:
 
 @dataclass(frozen=True)
 class StatementView:
+    verb: str
     trigger: str
-    expected_state: str
+    state: str
     payload: str
+    expected_outcome: str
+    headers_text: str
     verifiers: list[VerifierView]
 
 
@@ -88,6 +100,8 @@ class ContractDetail:
     name: str
     version: int
     publisher_name: str
+    is_latest: bool
+    latest_id: int
     versions: list[VersionView]
     active_verifiers: list[VerifierView]
     statements: list[StatementView]
@@ -136,22 +150,26 @@ def _clean_email(value: str) -> str:
     return cleaned
 
 
-def _clean_statement(trigger: str, expected_state: str, payload: str) -> tuple[str, str, str]:
-    trigger = trigger.strip()
-    expected_state = expected_state.strip()
-    if not trigger:
-        raise DomainError(400, "Trigger endpoint is required")
-    if len(trigger) > 500:
-        raise DomainError(400, "Trigger endpoint must be at most 500 characters")
-    if not expected_state:
-        raise DomainError(400, "Expected state is required")
-    if len(expected_state) > 2000:
-        raise DomainError(400, "Expected state must be at most 2000 characters")
+def _clean_statement(
+    verb: str,
+    trigger: str,
+    state: str,
+    payload: str,
+    expected_outcome: str,
+    headers: list[tuple[str, str]],
+) -> tuple[str, str, str, str, str, str]:
     if payload is None:
         payload = ""
     if len(payload) > 20000:
         raise DomainError(400, "Payload must be at most 20000 characters")
-    return trigger, expected_state, payload
+    return (
+        _checked(clean_verb, verb),
+        _clean_name(trigger, "Trigger endpoint", 500),
+        _clean_name(state, "State", 2000),
+        payload,
+        _clean_name(expected_outcome, "Expected outcome", 2000),
+        dump_headers(_checked(clean_header_pairs, headers)),
+    )
 
 
 def authenticate(db: Session, username: str, password: str) -> User | None:
@@ -257,13 +275,23 @@ def create_contract(db: Session, company_id: int, name: str, publisher_name: str
     db.flush()
     db.add(Publisher(contract=contract, name=publisher_name))
     for item in statements:
-        trigger, expected_state, payload = _clean_statement(item.trigger, item.expected_state, item.payload)
+        verb, trigger, state, payload, expected_outcome, headers_json = _clean_statement(
+            item.verb,
+            item.trigger,
+            item.state,
+            item.payload,
+            item.expected_outcome,
+            [(header.name, header.value) for header in item.expected_headers],
+        )
         db.add(
             Statement(
                 contract=contract,
+                verb=verb,
                 trigger=trigger,
-                expected_state=expected_state,
+                state=state,
                 payload=payload,
+                expected_outcome=expected_outcome,
+                expected_headers_json=headers_json,
             )
         )
     _commit(db)
@@ -354,14 +382,27 @@ def create_statement(
     db: Session,
     company_id: int,
     contract_id: int,
+    verb: str,
     trigger: str,
-    expected_state: str,
+    state: str,
     payload: str,
+    expected_outcome: str,
+    headers: list[tuple[str, str]],
 ) -> Statement:
     source = get_contract(db, company_id, contract_id)
-    trigger, expected_state, payload = _clean_statement(trigger, expected_state, payload)
+    verb, trigger, state, payload, expected_outcome, headers_json = _clean_statement(
+        verb, trigger, state, payload, expected_outcome, headers
+    )
     forked = _fork(db, source)
-    created = Statement(contract=forked, trigger=trigger, expected_state=expected_state, payload=payload)
+    created = Statement(
+        contract=forked,
+        verb=verb,
+        trigger=trigger,
+        state=state,
+        payload=payload,
+        expected_outcome=expected_outcome,
+        expected_headers_json=headers_json,
+    )
     db.add(created)
     _commit(db)
     db.refresh(created)
@@ -371,14 +412,22 @@ def create_statement(
 def update_statement(
     db: Session,
     statement: Statement,
+    verb: str,
     trigger: str,
-    expected_state: str,
+    state: str,
     payload: str,
+    expected_outcome: str,
+    headers: list[tuple[str, str]],
 ) -> Statement:
-    trigger, expected_state, payload = _clean_statement(trigger, expected_state, payload)
+    verb, trigger, state, payload, expected_outcome, headers_json = _clean_statement(
+        verb, trigger, state, payload, expected_outcome, headers
+    )
+    statement.verb = verb
     statement.trigger = trigger
-    statement.expected_state = expected_state
+    statement.state = state
     statement.payload = payload
+    statement.expected_outcome = expected_outcome
+    statement.expected_headers_json = headers_json
     _commit(db)
     db.refresh(statement)
     return statement
@@ -454,7 +503,7 @@ def verifier_page(db: Session, company_id: int, verifier_id: int) -> VerifierDet
         contract_id=contract.id,
         contract_name=contract.name,
         contract_version=contract.version,
-        statement_trigger=statement.trigger,
+        statement_trigger=_endpoint(statement),
         last_verified_label=format_timestamp(verifier.last_verified_at),
     )
 
@@ -709,6 +758,7 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
         .unique()
         .all()
     )
+    latest = max(family, key=lambda item: item.version)
     statements = list(
         db.scalars(
             select(Statement)
@@ -722,6 +772,8 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
         name=contract.name,
         version=contract.version,
         publisher_name=contract.publisher_name,
+        is_latest=contract.id == latest.id,
+        latest_id=latest.id,
         versions=[
             VersionView(
                 id=item.id,
@@ -734,11 +786,14 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
         active_verifiers=[_verifier_view(item) for item in active_rows],
         statements=[
             StatementView(
+                verb=statement.verb,
                 trigger=statement.trigger,
-                expected_state=statement.expected_state,
+                state=statement.state,
                 payload=statement.payload,
+                expected_outcome=statement.expected_outcome,
+                headers_text=format_headers(load_headers(statement.expected_headers_json)),
                 verifiers=[
-                    _verifier_view(verifier, statement.trigger)
+                    _verifier_view(verifier)
                     for verifier in sorted(statement.verifiers, key=lambda item: (item.name.casefold(), item.id))
                 ],
             )
@@ -747,13 +802,16 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
     )
 
 
-def _verifier_view(verifier: Verifier, trigger: str | None = None) -> VerifierView:
-    statement_trigger = trigger if trigger is not None else verifier.statement.trigger
+def _endpoint(statement: Statement) -> str:
+    return f"{statement.verb} {statement.trigger}".strip()
+
+
+def _verifier_view(verifier: Verifier) -> VerifierView:
     return VerifierView(
         id=verifier.id,
         name=verifier.name,
         version=verifier.version,
-        statement_trigger=statement_trigger,
+        statement_trigger=_endpoint(verifier.statement),
         last_verified_label=format_timestamp(verifier.last_verified_at),
     )
 
@@ -795,9 +853,12 @@ def _fork(db: Session, source: Contract, exclude_statement_id: int | None = None
 def _copy_statement(db: Session, source: Statement, target: Contract) -> None:
     copy = Statement(
         contract=target,
+        verb=source.verb,
         trigger=source.trigger,
-        expected_state=source.expected_state,
+        state=source.state,
         payload=source.payload,
+        expected_outcome=source.expected_outcome,
+        expected_headers_json=source.expected_headers_json,
     )
     db.add(copy)
     for verifier in source.verifiers:

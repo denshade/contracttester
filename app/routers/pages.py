@@ -6,6 +6,7 @@ from app.deps import CurrentUser, Db, current_user
 from app.errors import DomainError
 from app.models import User
 from app.templating import templates
+from app.triggers import parse_header_block
 
 router = APIRouter()
 
@@ -281,6 +282,74 @@ def contract_detail(contract_id: int, request: Request, db: Db, user: CurrentUse
             raise
         return render(request, "not_found.html", user, status_code=404, section="contracts")
     return render(request, "contract_detail.html", user, section="contracts", contract=detail)
+
+
+@router.post("/contracts/{contract_id}/statements")
+def add_statement(
+    contract_id: int,
+    request: Request,
+    db: Db,
+    user: CurrentUser,
+    verb: str = Form(),
+    trigger: str = Form(),
+    state: str = Form(),
+    payload: str = Form(""),
+    expected_outcome: str = Form(),
+    expected_headers: str = Form(""),
+):
+    try:
+        headers = parse_header_block(expected_headers)
+        created = services.create_statement(
+            db,
+            user.company_id,
+            contract_id,
+            verb,
+            trigger,
+            state,
+            payload,
+            expected_outcome,
+            headers,
+        )
+    except DomainError as exc:
+        if exc.status_code == 404:
+            return render(request, "not_found.html", user, status_code=404, section="contracts")
+        db.rollback()
+        detail = services.contract_detail(db, user.company_id, contract_id)
+        return render(
+            request,
+            "contract_detail.html",
+            user,
+            status_code=exc.status_code,
+            section="contracts",
+            contract=detail,
+            statement_error=exc.detail,
+            statement_verb=verb,
+            statement_trigger=trigger,
+            statement_state=state,
+            statement_payload=payload,
+            statement_outcome=expected_outcome,
+            statement_headers=expected_headers,
+        )
+    except ValueError as exc:
+        db.rollback()
+        detail = services.contract_detail(db, user.company_id, contract_id)
+        return render(
+            request,
+            "contract_detail.html",
+            user,
+            status_code=400,
+            section="contracts",
+            contract=detail,
+            statement_error=str(exc),
+            statement_verb=verb,
+            statement_trigger=trigger,
+            statement_state=state,
+            statement_payload=payload,
+            statement_outcome=expected_outcome,
+            statement_headers=expected_headers,
+        )
+    request.session["flash"] = "Statement added."
+    return RedirectResponse(f"/contracts/{created.contract_id}", status_code=303)
 
 
 @router.post("/contracts/{contract_id}/publisher")

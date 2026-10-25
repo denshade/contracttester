@@ -8,10 +8,15 @@ from app.seed import (
     ACTIVE_VERIFIED_AT,
     ACTIVE_VERIFIER,
     BILL_GET,
+    BILL_GET_HEADER_LINES,
+    BILL_GET_OUTCOME,
     BILL_POST,
+    BILL_POST_HEADER_LINES,
+    BILL_POST_OUTCOME,
     BILL_PUBLISHER,
     BILL_POST_PAYLOAD,
     BILL_POST_STATE,
+    DOCK_OUTCOME,
     DOCK_PAYLOAD,
     DOCK_PUBLISHER,
     DOCK_POST,
@@ -172,6 +177,78 @@ def test_contracts_can_be_created_edited_and_deleted(auth_client):
     assert f'value="{BILL_PUBLISHER}"' in older.text
 
 
+def test_adding_a_statement_creates_the_next_version(auth_client):
+    overview = auth_client.get("/contracts")
+    bill = re.search(rf'data-contract-name="{ACTIVE_CONTRACT}" data-contract-id="(\d+)"', overview.text)
+    assert bill
+    detail = auth_client.get(f"/contracts/{bill.group(1)}")
+    assert 'id="add-statement"' in detail.text
+    version_one = re.search(r'data-version="1".*?href="(/contracts/\d+)"', detail.text, re.S)
+    assert version_one
+    older = auth_client.get(version_one.group(1))
+    assert 'id="add-statement"' not in older.text
+    assert 'id="statements-latest-only"' in older.text
+
+    missing = auth_client.post(
+        f"/contracts/{bill.group(1)}/statements",
+        data={
+            "verb": "GET",
+            "trigger": "   ",
+            "state": "200 OK",
+            "payload": "",
+            "expected_outcome": "Returned",
+            "expected_headers": "",
+        },
+        follow_redirects=False,
+    )
+    assert missing.status_code == 400
+    assert "Trigger endpoint is required" in missing.text
+
+    rejected = auth_client.post(
+        f"{version_one.group(1)}/statements",
+        data={
+            "verb": "DELETE",
+            "trigger": "/bills/{id}",
+            "state": "204 No Content",
+            "payload": "",
+            "expected_outcome": "The bill is removed",
+            "expected_headers": "",
+        },
+        follow_redirects=False,
+    )
+    assert rejected.status_code == 409
+    assert "latest version" in rejected.text
+
+    added = auth_client.post(
+        f"/contracts/{bill.group(1)}/statements",
+        data={
+            "verb": "POST",
+            "trigger": "/receipts",
+            "state": "202 Accepted",
+            "payload": '{"ok":true}',
+            "expected_outcome": "The receipt is stored",
+            "expected_headers": "Location: /receipts/1",
+        },
+        follow_redirects=True,
+    )
+    assert added.status_code == 200
+    assert "Statement added." in added.text
+    assert 'data-version="3"' in added.text
+    assert 'data-current="true"' in added.text
+    assert 'data-verb="POST" data-trigger="/receipts"' in added.text
+    assert "202 Accepted" in added.text
+    assert "The receipt is stored" in added.text
+    assert "Location: /receipts/1" in added.text
+    assert escape('{"ok":true}') in added.text
+    assert 'data-verb="POST" data-trigger="/bills"' in added.text
+    previous = re.search(r'data-version="2".*?href="(/contracts/\d+)"', added.text, re.S)
+    assert previous
+    unchanged = auth_client.get(previous.group(1))
+    assert 'data-trigger="/receipts"' not in unchanged.text
+    assert 'data-verb="POST" data-trigger="/bills"' in unchanged.text
+    assert 'data-version="2" data-active="yes" data-current="true"' in unchanged.text
+
+
 def test_contract_details_versions_statements_and_removal(auth_client):
     overview = auth_client.get("/contracts")
     bill = re.search(
@@ -191,9 +268,13 @@ def test_contract_details_versions_statements_and_removal(auth_client):
     assert 'data-version="2" data-active="yes" data-current="true"' in detail.text
     assert f'data-verifier="{ACTIVE_VERIFIER}"' in detail.text
     assert format_timestamp(ACTIVE_VERIFIED_AT) in detail.text
-    assert f'data-trigger="{BILL_GET}"' in detail.text
-    assert f'data-trigger="{BILL_POST}"' in detail.text
+    assert f'data-verb="GET" data-trigger="{BILL_GET}"' in detail.text
+    assert f'data-verb="POST" data-trigger="{BILL_POST}"' in detail.text
+    assert BILL_GET_OUTCOME in detail.text
+    assert BILL_GET_HEADER_LINES in detail.text
     assert BILL_POST_STATE in detail.text
+    assert BILL_POST_OUTCOME in detail.text
+    assert BILL_POST_HEADER_LINES in detail.text
     assert escape(BILL_POST_PAYLOAD) in detail.text
     assert 'id="active-verifiers"' in detail.text
 
@@ -213,8 +294,9 @@ def test_contract_details_versions_statements_and_removal(auth_client):
     dock_page = auth_client.get(f"/contracts/{dock.group(1)}")
     assert f'value="{DOCK_PUBLISHER}"' in dock_page.text
     assert "This version has no active verifiers." in dock_page.text
-    assert f'data-trigger="{DOCK_POST}"' in dock_page.text
+    assert f'data-verb="POST" data-trigger="{DOCK_POST}"' in dock_page.text
     assert DOCK_STATE in dock_page.text
+    assert DOCK_OUTCOME in dock_page.text
     assert escape(DOCK_PAYLOAD) in dock_page.text
     assert f'data-verifier="{DOCK_VERIFIER}"' in dock_page.text
     assert 'data-verified="Not verified"' in dock_page.text

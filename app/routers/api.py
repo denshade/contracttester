@@ -131,9 +131,12 @@ def create_statement(body: StatementCreate, db: Db, company: CurrentCompany) -> 
         db,
         company.id,
         body.contract_id,
+        body.verb,
         body.trigger,
-        body.expected_state,
+        body.state,
         body.payload,
+        body.expected_outcome,
+        [(header.name, header.value) for header in body.expected_headers],
     )
 
 
@@ -144,9 +147,18 @@ def get_statement(statement_id: int, db: Db, company: CurrentCompany) -> object:
 
 @router.put("/statements/{statement_id}", response_model=StatementOut, tags=["statements"])
 def update_statement(statement_id: int, body: StatementWrite, db: Db, company: CurrentCompany) -> object:
-    """Updates trigger, expected state, and payload on this version only."""
+    """Updates this statement on its current version only."""
     statement = services.get_statement(db, company.id, statement_id)
-    return services.update_statement(db, statement, body.trigger, body.expected_state, body.payload)
+    return services.update_statement(
+        db,
+        statement,
+        body.verb,
+        body.trigger,
+        body.state,
+        body.payload,
+        body.expected_outcome,
+        [(header.name, header.value) for header in body.expected_headers],
+    )
 
 
 @router.delete("/statements/{statement_id}", response_model=StatementRemoval, tags=["statements"])

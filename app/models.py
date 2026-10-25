@@ -95,9 +95,12 @@ class Statement(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"), index=True)
+    verb: Mapped[str] = mapped_column(String(16))
     trigger: Mapped[str] = mapped_column(String(500))
-    expected_state: Mapped[str] = mapped_column(String(2000))
+    state: Mapped[str] = mapped_column(String(2000))
     payload: Mapped[str] = mapped_column(Text, default="")
+    expected_outcome: Mapped[str] = mapped_column(String(2000))
+    expected_headers_json: Mapped[str] = mapped_column("expected_headers", Text, default="[]")
 
     contract: Mapped[Contract] = relationship(back_populates="statements")
     verifiers: Mapped[list["Verifier"]] = relationship(
@@ -109,6 +112,12 @@ class Statement(Base):
     @property
     def contract_version(self) -> int:
         return self.contract.version
+
+    @property
+    def expected_headers(self) -> list[dict[str, str]]:
+        from app.triggers import load_headers
+
+        return [{"name": name, "value": value} for name, value in load_headers(self.expected_headers_json)]
 
 
 class Verifier(Base):

@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.database import (
     ensure_publisher_name,
+    ensure_statement_fields,
     ensure_verifier_call,
     ensure_verifier_trigger,
     make_engine,
@@ -36,6 +37,7 @@ def create_app(database_url: str | None = None, *, seed: bool = True) -> FastAPI
     ensure_verifier_trigger(engine)
     ensure_verifier_call(engine)
     ensure_publisher_name(engine)
+    ensure_statement_fields(engine)
     if seed:
         with session_factory() as db:
             seed_if_empty(db)

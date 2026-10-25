@@ -121,3 +121,101 @@ def _upgrade_seed_triggers(engine: Engine) -> None:
                 ),
                 {"name": name, "old": old, "trigger": trigger, "token": token, "headers": headers},
             )
+
+
+def ensure_statement_fields(engine: Engine) -> None:
+    """Rename expected state to state, and add verb, expected outcome, and headers."""
+    if engine.dialect.name != "sqlite":
+        return
+    tables = inspect(engine).get_table_names()
+    if "statements" not in tables:
+        return
+    columns = {column["name"] for column in inspect(engine).get_columns("statements")}
+    with engine.begin() as connection:
+        if "expected_state" in columns and "state" not in columns:
+            connection.execute(text("ALTER TABLE statements RENAME COLUMN expected_state TO state"))
+        if "verb" not in columns:
+            connection.execute(text("ALTER TABLE statements ADD COLUMN verb VARCHAR(16) NOT NULL DEFAULT ''"))
+        if "expected_outcome" not in columns:
+            connection.execute(text("ALTER TABLE statements ADD COLUMN expected_outcome VARCHAR(2000) NOT NULL DEFAULT ''"))
+        if "expected_headers" not in columns:
+            connection.execute(text("ALTER TABLE statements ADD COLUMN expected_headers TEXT NOT NULL DEFAULT '[]'"))
+    _split_legacy_statement_calls(engine)
+    _upgrade_seed_statement_outcomes(engine)
+
+
+def _split_legacy_statement_calls(engine: Engine) -> None:
+    """Older statements stored the verb in the endpoint, and had no expected outcome."""
+    from app.http_methods import HTTP_VERBS
+
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text("SELECT id, trigger, verb, state, expected_outcome FROM statements")
+        ).mappings()
+        for row in rows:
+            verb = (row["verb"] or "").strip()
+            trigger = row["trigger"] or ""
+            outcome = (row["expected_outcome"] or "").strip()
+            new_verb = verb
+            new_trigger = trigger
+            if not verb:
+                head, separator, rest = trigger.partition(" ")
+                if separator and head.upper() in HTTP_VERBS and rest.strip():
+                    new_verb = head.upper()
+                    new_trigger = rest.strip()
+                else:
+                    new_verb = "GET"
+            new_outcome = outcome or (row["state"] or "").strip() or "Recorded"
+            if new_verb == verb and new_trigger == trigger and new_outcome == (row["expected_outcome"] or ""):
+                continue
+            connection.execute(
+                text(
+                    "UPDATE statements SET verb = :verb, trigger = :trigger, expected_outcome = :outcome "
+                    "WHERE id = :id"
+                ),
+                {"verb": new_verb, "trigger": new_trigger, "outcome": new_outcome, "id": row["id"]},
+            )
+
+
+def _upgrade_seed_statement_outcomes(engine: Engine) -> None:
+    """Sample statements migrated from a status-only outcome get their sample outcome and headers."""
+    from app.seed import (
+        BILL_GET,
+        BILL_GET_HEADER_LINES,
+        BILL_GET_OUTCOME,
+        BILL_GET_STATE,
+        BILL_GET_VERB,
+        BILL_POST,
+        BILL_POST_HEADER_LINES,
+        BILL_POST_OUTCOME,
+        BILL_POST_STATE,
+        BILL_POST_VERB,
+        DOCK_HEADER_LINES,
+        DOCK_OUTCOME,
+        DOCK_POST,
+        DOCK_STATE,
+        DOCK_VERB,
+    )
+    from app.triggers import dump_headers, parse_header_block
+
+    rows = (
+        (BILL_GET_VERB, BILL_GET, BILL_GET_STATE, BILL_GET_OUTCOME, BILL_GET_HEADER_LINES),
+        (BILL_POST_VERB, BILL_POST, BILL_POST_STATE, BILL_POST_OUTCOME, BILL_POST_HEADER_LINES),
+        (DOCK_VERB, DOCK_POST, DOCK_STATE, DOCK_OUTCOME, DOCK_HEADER_LINES),
+    )
+    with engine.begin() as connection:
+        for verb, trigger, state, outcome, header_lines in rows:
+            connection.execute(
+                text(
+                    "UPDATE statements SET expected_outcome = :outcome, expected_headers = :headers "
+                    "WHERE verb = :verb AND trigger = :trigger AND state = :state "
+                    "AND expected_outcome = :state AND expected_headers = '[]'"
+                ),
+                {
+                    "verb": verb,
+                    "trigger": trigger,
+                    "state": state,
+                    "outcome": outcome,
+                    "headers": dump_headers(parse_header_block(header_lines)),
+                },
+            )

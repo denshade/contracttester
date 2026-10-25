@@ -84,22 +84,33 @@
     <table class="stack-rows">
       <thead>
         <tr>
+          <th scope="col">Verb</th>
           <th scope="col">Endpoint</th>
-          <th scope="col">Expected state</th>
+          <th scope="col">State</th>
           <th scope="col">Payload</th>
+          <th scope="col">Expected outcome</th>
           <th scope="col">Verified by</th>
         </tr>
       </thead>
       <tbody id="statements">
         {% for statement in contract.statements %}
-        <tr data-trigger="{{ statement.trigger }}">
+        <tr data-verb="{{ statement.verb }}" data-trigger="{{ statement.trigger }}">
+          <td data-label="Verb">{{ statement.verb }}</td>
           <td data-label="Endpoint"><code>{{ statement.trigger }}</code></td>
-          <td data-label="Expected state">{{ statement.expected_state }}</td>
+          <td data-label="State">{{ statement.state }}</td>
           <td data-label="Payload">
             {% if statement.payload %}
             <pre class="payload">{{ statement.payload }}</pre>
             {% else %}
             <span class="muted">Empty</span>
+            {% endif %}
+          </td>
+          <td data-label="Expected outcome">
+            {{ statement.expected_outcome }}
+            {% if statement.headers_text %}
+            <pre class="payload">{{ statement.headers_text }}</pre>
+            {% else %}
+            <span class="muted">No headers</span>
             {% endif %}
           </td>
           <td data-label="Verified by">
@@ -117,7 +128,53 @@
     </table>
   </div>
   {% else %}
-  <p>This version has no statements.</p>
+  <p id="statements-empty">This version has no statements.</p>
+  {% endif %}
+  {% if contract.is_latest or statement_error %}
+  <section class="section panel stack" aria-labelledby="add-statement-heading">
+    <h2 id="add-statement-heading">Add a statement</h2>
+    <p class="muted">Adding a statement creates the next version. This version stays as it is.</p>
+    {% if statement_error %}
+    <p class="error" role="alert">{{ statement_error }}</p>
+    {% endif %}
+    <form class="stack" method="post" action="/contracts/{{ contract.id }}/statements">
+      <div class="field">
+        <label for="statement-verb">Verb</label>
+        <select id="statement-verb" name="verb" required>
+          <option value="" {% if not statement_verb %}selected{% endif %} disabled>Choose a verb</option>
+          {% for verb in http_verbs %}
+          <option value="{{ verb }}" {% if statement_verb == verb %}selected{% endif %}>{{ verb }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="statement-trigger">Endpoint</label>
+        <input id="statement-trigger" name="trigger" type="text" value="{{ statement_trigger|default('') }}" required>
+      </div>
+      <div class="field">
+        <label for="statement-state">State</label>
+        <input id="statement-state" name="state" type="text" value="{{ statement_state|default('') }}" required>
+      </div>
+      <div class="field">
+        <label for="statement-payload">Payload</label>
+        <textarea id="statement-payload" name="payload">{{ statement_payload|default('') }}</textarea>
+      </div>
+      <div class="field">
+        <label for="statement-outcome">Expected outcome</label>
+        <input id="statement-outcome" name="expected_outcome" type="text" value="{{ statement_outcome|default('') }}" required>
+      </div>
+      <div class="field">
+        <label for="statement-headers">Headers to check</label>
+        <textarea id="statement-headers" name="expected_headers">{{ statement_headers|default('') }}</textarea>
+        <p class="muted">One header per line, as Name: Value. Leave this blank when no header needs checking.</p>
+      </div>
+      <div>
+        <button class="button" id="add-statement" type="submit">Add statement</button>
+      </div>
+    </form>
+  </section>
+  {% else %}
+  <p class="muted" id="statements-latest-only">Statements can be added on the <a href="/contracts/{{ contract.latest_id }}">latest version</a>.</p>
   {% endif %}
 </section>
 {% endblock %}

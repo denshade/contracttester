@@ -8,8 +8,10 @@ publisher <1-1> contract
 publisher <1-1> name
 
 statement <1-1> trigger (endpoint)
-statement <1-1> expected state
+statement <1-1> state
 statement <1-1> payload
+statement <1-1> verb (enum GET, POST, ...)
+statement <1-1> expected outcome (also allow for headers to be checked)
 
 statement <1-*> verifier
 

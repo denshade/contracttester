@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.http_methods import clean_verb
 from app.triggers import clean_header_name, clean_header_pairs, clean_header_value, clean_http_url, clean_token
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -74,19 +75,27 @@ class UserOut(BaseModel):
 
 
 class StatementWrite(BaseModel):
+    verb: str
     trigger: str
-    expected_state: str
+    state: str
     payload: str = ""
+    expected_outcome: str
+    expected_headers: list["VerificationHeader"] = Field(default_factory=list)
+
+    @field_validator("verb")
+    @classmethod
+    def clean_statement_verb(cls, value: str) -> str:
+        return clean_verb(value)
 
     @field_validator("trigger")
     @classmethod
     def clean_trigger(cls, value: str) -> str:
         return required_text(value, "Trigger endpoint", 500)
 
-    @field_validator("expected_state")
+    @field_validator("state")
     @classmethod
-    def clean_expected_state(cls, value: str) -> str:
-        return required_text(value, "Expected state", 2000)
+    def clean_state(cls, value: str) -> str:
+        return required_text(value, "State", 2000)
 
     @field_validator("payload")
     @classmethod
@@ -94,6 +103,16 @@ class StatementWrite(BaseModel):
         if len(value) > 20000:
             raise ValueError("Payload must be at most 20000 characters")
         return value
+
+    @field_validator("expected_outcome")
+    @classmethod
+    def clean_outcome(cls, value: str) -> str:
+        return required_text(value, "Expected outcome", 2000)
+
+    @model_validator(mode="after")
+    def unique_expected_headers(self) -> "StatementWrite":
+        clean_header_pairs([(item.name, item.value) for item in self.expected_headers])
+        return self
 
 
 class StatementCreate(StatementWrite):
@@ -141,9 +160,12 @@ class StatementOut(BaseModel):
     id: int
     contract_id: int
     contract_version: int
+    verb: str
     trigger: str
-    expected_state: str
+    state: str
     payload: str
+    expected_outcome: str
+    expected_headers: list["VerificationHeader"]
 
 
 class StatementRemoval(BaseModel):
@@ -245,3 +267,8 @@ class PublisherOut(BaseModel):
     id: int
     contract_id: int
     name: str
+
+
+StatementWrite.model_rebuild()
+StatementCreate.model_rebuild()
+StatementOut.model_rebuild()

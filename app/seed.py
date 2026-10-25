@@ -9,14 +9,23 @@ from app.triggers import dump_headers, parse_header_block
 COMPANY_NAME = "Harbor & Co."
 ACTIVE_CONTRACT = "Bill of Lading"
 INACTIVE_CONTRACT = "Dock Appointment"
-BILL_GET = "GET /bills/{id}"
+BILL_GET_VERB = "GET"
+BILL_GET = "/bills/{id}"
 BILL_GET_STATE = "200 OK"
-BILL_POST = "POST /bills"
+BILL_GET_OUTCOME = "The bill is returned"
+BILL_GET_HEADER_LINES = "Content-Type: application/json"
+BILL_POST_VERB = "POST"
+BILL_POST = "/bills"
 BILL_POST_STATE = "201 Created"
 BILL_POST_PAYLOAD = '{"shipper":"Harbor"}'
-DOCK_POST = "POST /docks"
+BILL_POST_OUTCOME = "The bill is stored"
+BILL_POST_HEADER_LINES = "Location: /bills/{id}"
+DOCK_VERB = "POST"
+DOCK_POST = "/docks"
 DOCK_STATE = "202 Accepted"
 DOCK_PAYLOAD = '{"dock":"B"}'
+DOCK_OUTCOME = "The appointment is accepted"
+DOCK_HEADER_LINES = ""
 BILL_PUBLISHER = "Harbor Shipping"
 DOCK_PUBLISHER = "North Quay"
 ACTIVE_VERIFIER = "Schema shape"
@@ -60,9 +69,12 @@ def seed_if_empty(db: Session) -> None:
         BILL_PUBLISHER,
         [
             _statement(
+                BILL_GET_VERB,
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
+                BILL_GET_OUTCOME,
+                BILL_GET_HEADER_LINES,
                 [_verifier(LEGACY_VERIFIER, 1, False, LEGACY_VERIFIED_AT, LEGACY_TRIGGER, LEGACY_TOKEN, LEGACY_HEADER_LINES, [LEGACY_TEST])],
             )
         ],
@@ -74,12 +86,15 @@ def seed_if_empty(db: Session) -> None:
         BILL_PUBLISHER,
         [
             _statement(
+                BILL_GET_VERB,
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
+                BILL_GET_OUTCOME,
+                BILL_GET_HEADER_LINES,
                 [_verifier(ACTIVE_VERIFIER, 1, True, ACTIVE_VERIFIED_AT, SCHEMA_TRIGGER, SCHEMA_TOKEN, SCHEMA_HEADER_LINES, [SCHEMA_TEST])],
             ),
-            _statement(BILL_POST, BILL_POST_STATE, BILL_POST_PAYLOAD, []),
+            _statement(BILL_POST_VERB, BILL_POST, BILL_POST_STATE, BILL_POST_PAYLOAD, BILL_POST_OUTCOME, BILL_POST_HEADER_LINES, []),
         ],
     )
     _contract(
@@ -89,9 +104,12 @@ def seed_if_empty(db: Session) -> None:
         DOCK_PUBLISHER,
         [
             _statement(
+                DOCK_VERB,
                 DOCK_POST,
                 DOCK_STATE,
                 DOCK_PAYLOAD,
+                DOCK_OUTCOME,
+                DOCK_HEADER_LINES,
                 [_verifier(DOCK_VERIFIER, 3, False, None, DOCK_TRIGGER, DOCK_TOKEN, DOCK_HEADER_LINES, [DOCK_TEST])],
             )
         ],
@@ -124,8 +142,23 @@ def _verifier(
     return verifier
 
 
-def _statement(trigger: str, expected_state: str, payload: str, verifiers: list[Verifier]) -> Statement:
-    statement = Statement(trigger=trigger, expected_state=expected_state, payload=payload)
+def _statement(
+    verb: str,
+    trigger: str,
+    state: str,
+    payload: str,
+    expected_outcome: str,
+    header_lines: str,
+    verifiers: list[Verifier],
+) -> Statement:
+    statement = Statement(
+        verb=verb,
+        trigger=trigger,
+        state=state,
+        payload=payload,
+        expected_outcome=expected_outcome,
+        expected_headers_json=dump_headers(parse_header_block(header_lines)),
+    )
     for verifier in verifiers:
         verifier.statement = statement
     return statement
