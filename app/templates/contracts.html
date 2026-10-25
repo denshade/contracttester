@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Contracts · Contract Tester{% endblock %}
+{% block content %}
+<h1>Contracts</h1>
+<p class="lede">Contracts defined for {{ organization_name }}.</p>
+{% if contracts %}
+<div class="table-wrap">
+  <table>
+    <caption>Active verifiers reflects the latest version of each contract.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Active verifiers</th>
+      </tr>
+    </thead>
+    <tbody id="contracts">
+      {% for contract in contracts %}
+      <tr data-contract-name="{{ contract.name }}" data-contract-id="{{ contract.id }}" data-active="{{ 'yes' if contract.has_active_verifiers else 'no' }}">
+        <td><a href="/contracts/{{ contract.id }}">{{ contract.name }}</a></td>
+        <td><span class="pill {{ 'yes' if contract.has_active_verifiers else 'no' }}">{{ "Yes" if contract.has_active_verifiers else "No" }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p id="contracts-empty">No contracts are defined yet.</p>
+{% endif %}
+{% endblock %}

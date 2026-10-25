@@ -1,0 +1,630 @@
+"""Contract versioning and persistence.
+
+Adding or removing a statement forks a new numeric version of that contract.
+The previous version stays as it was. Name and version together are unique.
+A contract version always has one publisher.
+"""
+
+import re
+import secrets
+from dataclasses import dataclass
+
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, joinedload, selectinload
+
+from app.errors import DomainError
+from app.formatting import format_timestamp
+from app.models import Company, Contract, Publisher, Statement, User, Verifier, VerifierTest
+
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@dataclass(frozen=True)
+class ContractSummary:
+    id: int
+    name: str
+    version: int
+    has_active_verifiers: bool
+
+
+@dataclass(frozen=True)
+class VerifierView:
+    name: str
+    version: int
+    statement_trigger: str
+    last_verified_label: str
+
+
+@dataclass(frozen=True)
+class StatementView:
+    trigger: str
+    expected_state: str
+    payload: str
+    verifiers: list[VerifierView]
+
+
+@dataclass(frozen=True)
+class VersionView:
+    id: int
+    version: int
+    has_active_verifiers: bool
+    current: bool
+
+
+@dataclass(frozen=True)
+class ContractDetail:
+    id: int
+    name: str
+    version: int
+    versions: list[VersionView]
+    active_verifiers: list[VerifierView]
+    statements: list[StatementView]
+
+
+def _commit(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise DomainError(409, "That record conflicts with an existing one") from exc
+
+
+def _clean_name(value: str, label: str = "Name", max_length: int = 200) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise DomainError(400, f"{label} is required")
+    if len(cleaned) > max_length:
+        raise DomainError(400, f"{label} must be at most {max_length} characters")
+    return cleaned
+
+
+def _clean_email(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) > 200 or not _EMAIL.fullmatch(cleaned):
+        raise DomainError(400, "Email must be a valid email address")
+    return cleaned
+
+
+def _clean_statement(trigger: str, expected_state: str, payload: str) -> tuple[str, str, str]:
+    trigger = trigger.strip()
+    expected_state = expected_state.strip()
+    if not trigger:
+        raise DomainError(400, "Trigger endpoint is required")
+    if len(trigger) > 500:
+        raise DomainError(400, "Trigger endpoint must be at most 500 characters")
+    if not expected_state:
+        raise DomainError(400, "Expected state is required")
+    if len(expected_state) > 2000:
+        raise DomainError(400, "Expected state must be at most 2000 characters")
+    if payload is None:
+        payload = ""
+    if len(payload) > 20000:
+        raise DomainError(400, "Payload must be at most 20000 characters")
+    return trigger, expected_state, payload
+
+
+def authenticate(db: Session, username: str, password: str) -> User | None:
+    username = username.strip()
+    if not username:
+        return None
+    user = db.scalar(select(User).where(User.username == username))
+    if user is None or not user.password:
+        return None
+    if not secrets.compare_digest(user.password, password):
+        return None
+    return user
+
+
+def issue_access_token(db: Session, company: Company) -> str:
+    company.access_token = secrets.token_urlsafe(32)
+    _commit(db)
+    db.refresh(company)
+    return company.access_token
+
+
+def update_company(db: Session, company: Company, name: str) -> Company:
+    company.name = _clean_name(name, "Organization name")
+    _commit(db)
+    db.refresh(company)
+    return company
+
+
+def create_company(db: Session, name: str) -> Company:
+    if db.scalar(select(Company.id).limit(1)) is not None:
+        raise DomainError(409, "An organization already exists")
+    company = Company(name=_clean_name(name, "Organization name"))
+    db.add(company)
+    _commit(db)
+    db.refresh(company)
+    return company
+
+
+def delete_company(db: Session, company: Company) -> None:
+    db.delete(company)
+    _commit(db)
+
+
+def list_users(db: Session, company_id: int) -> list[User]:
+    return list(db.scalars(select(User).where(User.company_id == company_id).order_by(User.id)).all())
+
+
+def get_user(db: Session, company_id: int, user_id: int) -> User:
+    user = db.scalar(select(User).where(User.id == user_id, User.company_id == company_id))
+    if user is None:
+        raise DomainError(404, "User not found")
+    return user
+
+
+def create_user(db: Session, company_id: int, name: str, email: str) -> User:
+    user = User(company_id=company_id, name=_clean_name(name, "Name"), email=_clean_email(email))
+    db.add(user)
+    _commit(db)
+    db.refresh(user)
+    return user
+
+
+def update_user(db: Session, user: User, name: str, email: str) -> User:
+    user.name = _clean_name(name, "Name")
+    user.email = _clean_email(email)
+    _commit(db)
+    db.refresh(user)
+    return user
+
+
+def delete_user(db: Session, user: User) -> None:
+    db.delete(user)
+    _commit(db)
+
+
+def list_contracts(db: Session, company_id: int) -> list[Contract]:
+    return list(
+        db.scalars(
+            select(Contract).where(Contract.company_id == company_id).order_by(Contract.name, Contract.version)
+        ).all()
+    )
+
+
+def get_contract(db: Session, company_id: int, contract_id: int) -> Contract:
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.company_id == company_id))
+    if contract is None:
+        raise DomainError(404, "Contract not found")
+    return contract
+
+
+def create_contract(db: Session, company_id: int, name: str, statements: list) -> Contract:
+    name = _clean_name(name, "Name")
+    if db.scalar(select(Contract.id).where(Contract.name == name).limit(1)) is not None:
+        raise DomainError(409, "A contract with this name already exists")
+    contract = Contract(company_id=company_id, name=name, version=1)
+    db.add(contract)
+    db.flush()
+    db.add(Publisher(contract=contract))
+    for item in statements:
+        trigger, expected_state, payload = _clean_statement(item.trigger, item.expected_state, item.payload)
+        db.add(
+            Statement(
+                contract=contract,
+                trigger=trigger,
+                expected_state=expected_state,
+                payload=payload,
+            )
+        )
+    _commit(db)
+    db.refresh(contract)
+    return contract
+
+
+def update_contract_name(db: Session, contract: Contract, name: str) -> Contract:
+    name = _clean_name(name, "Name")
+    if name == contract.name:
+        return contract
+    if db.scalar(select(Contract.id).where(Contract.name == name).limit(1)) is not None:
+        raise DomainError(409, "A contract with this name already exists")
+    members = db.scalars(
+        select(Contract).where(Contract.company_id == contract.company_id, Contract.name == contract.name)
+    ).all()
+    for member in members:
+        member.name = name
+    _commit(db)
+    db.refresh(contract)
+    return contract
+
+
+def delete_contract_version(db: Session, contract: Contract) -> None:
+    db.delete(contract)
+    _commit(db)
+
+
+def delete_contract_family(db: Session, contract: Contract) -> None:
+    members = list(
+        db.scalars(
+            select(Contract).where(Contract.company_id == contract.company_id, Contract.name == contract.name)
+        ).all()
+    )
+    for member in members:
+        db.delete(member)
+    _commit(db)
+
+
+def list_statements(db: Session, company_id: int) -> list[Statement]:
+    return list(
+        db.scalars(
+            select(Statement)
+            .join(Contract)
+            .where(Contract.company_id == company_id)
+            .options(joinedload(Statement.contract))
+            .order_by(Statement.id)
+        )
+        .unique()
+        .all()
+    )
+
+
+def get_statement(db: Session, company_id: int, statement_id: int) -> Statement:
+    statement = db.scalar(
+        select(Statement)
+        .join(Contract)
+        .where(Statement.id == statement_id, Contract.company_id == company_id)
+        .options(joinedload(Statement.contract))
+    )
+    if statement is None:
+        raise DomainError(404, "Statement not found")
+    return statement
+
+
+def create_statement(
+    db: Session,
+    company_id: int,
+    contract_id: int,
+    trigger: str,
+    expected_state: str,
+    payload: str,
+) -> Statement:
+    source = get_contract(db, company_id, contract_id)
+    trigger, expected_state, payload = _clean_statement(trigger, expected_state, payload)
+    forked = _fork(db, source)
+    created = Statement(contract=forked, trigger=trigger, expected_state=expected_state, payload=payload)
+    db.add(created)
+    _commit(db)
+    db.refresh(created)
+    return created
+
+
+def update_statement(
+    db: Session,
+    statement: Statement,
+    trigger: str,
+    expected_state: str,
+    payload: str,
+) -> Statement:
+    trigger, expected_state, payload = _clean_statement(trigger, expected_state, payload)
+    statement.trigger = trigger
+    statement.expected_state = expected_state
+    statement.payload = payload
+    _commit(db)
+    db.refresh(statement)
+    return statement
+
+
+def remove_statement(db: Session, statement: Statement) -> Contract:
+    forked = _fork(db, statement.contract, exclude_statement_id=statement.id)
+    _commit(db)
+    db.refresh(forked)
+    return forked
+
+
+def list_verifiers(db: Session, company_id: int) -> list[Verifier]:
+    return list(
+        db.scalars(
+            select(Verifier)
+            .join(Statement)
+            .join(Contract)
+            .where(Contract.company_id == company_id)
+            .order_by(Verifier.id)
+        ).all()
+    )
+
+
+def get_verifier(db: Session, company_id: int, verifier_id: int) -> Verifier:
+    verifier = db.scalar(
+        select(Verifier)
+        .join(Statement)
+        .join(Contract)
+        .where(Verifier.id == verifier_id, Contract.company_id == company_id)
+    )
+    if verifier is None:
+        raise DomainError(404, "Verifier not found")
+    return verifier
+
+
+def create_verifier(
+    db: Session,
+    company_id: int,
+    statement_id: int,
+    name: str,
+    version: int,
+    active: bool,
+    last_verified_at,
+) -> Verifier:
+    statement = get_statement(db, company_id, statement_id)
+    verifier = Verifier(
+        statement=statement,
+        name=_clean_name(name, "Verifier name"),
+        version=version,
+        active=active,
+        last_verified_at=last_verified_at,
+    )
+    db.add(verifier)
+    _commit(db)
+    db.refresh(verifier)
+    return verifier
+
+
+def update_verifier(
+    db: Session,
+    company_id: int,
+    verifier: Verifier,
+    statement_id: int,
+    name: str,
+    version: int,
+    active: bool,
+    last_verified_at,
+) -> Verifier:
+    statement = get_statement(db, company_id, statement_id)
+    verifier.statement = statement
+    verifier.name = _clean_name(name, "Verifier name")
+    verifier.version = version
+    verifier.active = active
+    verifier.last_verified_at = last_verified_at
+    _commit(db)
+    db.refresh(verifier)
+    return verifier
+
+
+def delete_verifier(db: Session, verifier: Verifier) -> None:
+    db.delete(verifier)
+    _commit(db)
+
+
+def list_tests(db: Session, company_id: int) -> list[VerifierTest]:
+    return list(
+        db.scalars(
+            select(VerifierTest)
+            .join(Verifier)
+            .join(Statement)
+            .join(Contract)
+            .where(Contract.company_id == company_id)
+            .order_by(VerifierTest.id)
+        ).all()
+    )
+
+
+def get_test(db: Session, company_id: int, test_id: int) -> VerifierTest:
+    test = db.scalar(
+        select(VerifierTest)
+        .join(Verifier)
+        .join(Statement)
+        .join(Contract)
+        .where(VerifierTest.id == test_id, Contract.company_id == company_id)
+    )
+    if test is None:
+        raise DomainError(404, "Test not found")
+    return test
+
+
+def create_test(db: Session, company_id: int, verifier_id: int, name: str) -> VerifierTest:
+    verifier = get_verifier(db, company_id, verifier_id)
+    test = VerifierTest(verifier=verifier, name=_clean_name(name, "Test name"))
+    db.add(test)
+    _commit(db)
+    db.refresh(test)
+    return test
+
+
+def update_test(db: Session, company_id: int, test: VerifierTest, verifier_id: int, name: str) -> VerifierTest:
+    verifier = get_verifier(db, company_id, verifier_id)
+    test.verifier = verifier
+    test.name = _clean_name(name, "Test name")
+    _commit(db)
+    db.refresh(test)
+    return test
+
+
+def delete_test(db: Session, test: VerifierTest) -> None:
+    db.delete(test)
+    _commit(db)
+
+
+def list_publishers(db: Session, company_id: int) -> list[Publisher]:
+    return list(
+        db.scalars(
+            select(Publisher).join(Contract).where(Contract.company_id == company_id).order_by(Publisher.id)
+        ).all()
+    )
+
+
+def get_publisher(db: Session, company_id: int, publisher_id: int) -> Publisher:
+    publisher = db.scalar(
+        select(Publisher)
+        .join(Contract)
+        .where(Publisher.id == publisher_id, Contract.company_id == company_id)
+    )
+    if publisher is None:
+        raise DomainError(404, "Publisher not found")
+    return publisher
+
+
+def create_publisher(db: Session, company_id: int, contract_id: int) -> Publisher:
+    contract = get_contract(db, company_id, contract_id)
+    if contract.publisher is not None:
+        raise DomainError(409, "This contract already has a publisher")
+    publisher = Publisher(contract=contract)
+    db.add(publisher)
+    _commit(db)
+    db.refresh(publisher)
+    return publisher
+
+
+def update_publisher(db: Session, company_id: int, publisher: Publisher, contract_id: int) -> Publisher:
+    if contract_id != publisher.contract_id:
+        raise DomainError(409, "A publisher cannot be moved to another contract")
+    get_contract(db, company_id, contract_id)
+    return publisher
+
+
+def delete_publisher(publisher: Publisher) -> None:
+    raise DomainError(409, "A contract must keep its publisher")
+
+
+def has_active_verifiers(db: Session, contract_id: int) -> bool:
+    found = db.scalar(
+        select(Verifier.id)
+        .join(Statement)
+        .where(Statement.contract_id == contract_id, Verifier.active.is_(True))
+        .limit(1)
+    )
+    return found is not None
+
+
+def contract_overview(db: Session, company_id: int) -> list[ContractSummary]:
+    contracts = list(
+        db.scalars(
+            select(Contract).where(Contract.company_id == company_id).order_by(Contract.name, Contract.version)
+        ).all()
+    )
+    latest: dict[str, Contract] = {}
+    for contract in contracts:
+        latest[contract.name] = contract
+    rows = [
+        ContractSummary(
+            id=contract.id,
+            name=contract.name,
+            version=contract.version,
+            has_active_verifiers=has_active_verifiers(db, contract.id),
+        )
+        for contract in latest.values()
+    ]
+    rows.sort(key=lambda row: row.name.casefold())
+    return rows
+
+
+def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractDetail:
+    contract = get_contract(db, company_id, contract_id)
+    family = list(
+        db.scalars(
+            select(Contract)
+            .where(Contract.company_id == company_id, Contract.name == contract.name)
+            .order_by(Contract.version)
+        ).all()
+    )
+    active_rows = list(
+        db.scalars(
+            select(Verifier)
+            .join(Statement)
+            .where(Statement.contract_id == contract.id, Verifier.active.is_(True))
+            .options(joinedload(Verifier.statement))
+            .order_by(Verifier.name, Verifier.id)
+        )
+        .unique()
+        .all()
+    )
+    statements = list(
+        db.scalars(
+            select(Statement)
+            .where(Statement.contract_id == contract.id)
+            .options(selectinload(Statement.verifiers))
+            .order_by(Statement.id)
+        ).all()
+    )
+    return ContractDetail(
+        id=contract.id,
+        name=contract.name,
+        version=contract.version,
+        versions=[
+            VersionView(
+                id=item.id,
+                version=item.version,
+                has_active_verifiers=has_active_verifiers(db, item.id),
+                current=item.id == contract.id,
+            )
+            for item in family
+        ],
+        active_verifiers=[_verifier_view(item) for item in active_rows],
+        statements=[
+            StatementView(
+                trigger=statement.trigger,
+                expected_state=statement.expected_state,
+                payload=statement.payload,
+                verifiers=[
+                    _verifier_view(verifier, statement.trigger)
+                    for verifier in sorted(statement.verifiers, key=lambda item: (item.name.casefold(), item.id))
+                ],
+            )
+            for statement in statements
+        ],
+    )
+
+
+def _verifier_view(verifier: Verifier, trigger: str | None = None) -> VerifierView:
+    statement_trigger = trigger if trigger is not None else verifier.statement.trigger
+    return VerifierView(
+        name=verifier.name,
+        version=verifier.version,
+        statement_trigger=statement_trigger,
+        last_verified_label=format_timestamp(verifier.last_verified_at),
+    )
+
+
+def _latest_version(db: Session, contract: Contract) -> int:
+    latest = db.scalar(
+        select(func.max(Contract.version)).where(
+            Contract.company_id == contract.company_id,
+            Contract.name == contract.name,
+        )
+    )
+    if latest is None:
+        raise DomainError(404, "Contract not found")
+    return latest
+
+
+def _fork(db: Session, source: Contract, exclude_statement_id: int | None = None) -> Contract:
+    latest = _latest_version(db, source)
+    if source.version != latest:
+        raise DomainError(409, "Statements can only be added or removed on the latest version of a contract")
+    forked = Contract(company_id=source.company_id, name=source.name, version=latest + 1)
+    db.add(forked)
+    db.flush()
+    db.add(Publisher(contract=forked))
+    statements = db.scalars(
+        select(Statement)
+        .where(Statement.contract_id == source.id)
+        .options(selectinload(Statement.verifiers).selectinload(Verifier.tests))
+        .order_by(Statement.id)
+    ).all()
+    for statement in statements:
+        if statement.id == exclude_statement_id:
+            continue
+        _copy_statement(db, statement, forked)
+    return forked
+
+
+def _copy_statement(db: Session, source: Statement, target: Contract) -> None:
+    copy = Statement(
+        contract=target,
+        trigger=source.trigger,
+        expected_state=source.expected_state,
+        payload=source.payload,
+    )
+    db.add(copy)
+    for verifier in source.verifiers:
+        verifier_copy = Verifier(
+            statement=copy,
+            name=verifier.name,
+            version=verifier.version,
+            active=verifier.active,
+            last_verified_at=verifier.last_verified_at,
+        )
+        db.add(verifier_copy)
+        for test in verifier.tests:
+            db.add(VerifierTest(verifier=verifier_copy, name=test.name))

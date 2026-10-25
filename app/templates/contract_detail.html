@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}{{ contract.name }} · Contract Tester{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ contract.name }}</h1>
+    <p class="lede">Version {{ contract.version }}</p>
+  </div>
+  <a class="button danger" id="remove-contract" href="/contracts/{{ contract.id }}/remove">Remove contract</a>
+</div>
+
+<section class="section" aria-labelledby="versions-heading">
+  <h2 id="versions-heading">Versions</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Version</th>
+          <th scope="col">Active verifiers</th>
+        </tr>
+      </thead>
+      <tbody id="versions">
+        {% for version in contract.versions %}
+        <tr data-version="{{ version.version }}" data-active="{{ 'yes' if version.has_active_verifiers else 'no' }}" data-current="{{ 'true' if version.current else 'false' }}">
+          <td><a href="/contracts/{{ version.id }}">Version {{ version.version }}</a></td>
+          <td><span class="pill {{ 'yes' if version.has_active_verifiers else 'no' }}">{{ "Yes" if version.has_active_verifiers else "No" }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="active-heading">
+  <h2 id="active-heading">Active verifiers</h2>
+  {% if contract.active_verifiers %}
+  <div class="table-wrap">
+    <table class="stack-rows">
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Version</th>
+          <th scope="col">Endpoint</th>
+          <th scope="col">Last verified</th>
+        </tr>
+      </thead>
+      <tbody id="active-verifiers">
+        {% for verifier in contract.active_verifiers %}
+        <tr data-verifier="{{ verifier.name }}">
+          <td data-label="Name">{{ verifier.name }}</td>
+          <td data-label="Version">{{ verifier.version }}</td>
+          <td data-label="Endpoint"><code>{{ verifier.statement_trigger }}</code></td>
+          <td data-label="Last verified">{{ verifier.last_verified_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p id="active-verifiers-empty">This version has no active verifiers.</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="statements-heading">
+  <h2 id="statements-heading">Statements</h2>
+  {% if contract.statements %}
+  <div class="table-wrap">
+    <table class="stack-rows">
+      <thead>
+        <tr>
+          <th scope="col">Endpoint</th>
+          <th scope="col">Expected state</th>
+          <th scope="col">Payload</th>
+          <th scope="col">Verified by</th>
+        </tr>
+      </thead>
+      <tbody id="statements">
+        {% for statement in contract.statements %}
+        <tr data-trigger="{{ statement.trigger }}">
+          <td data-label="Endpoint"><code>{{ statement.trigger }}</code></td>
+          <td data-label="Expected state">{{ statement.expected_state }}</td>
+          <td data-label="Payload">
+            {% if statement.payload %}
+            <pre class="payload">{{ statement.payload }}</pre>
+            {% else %}
+            <span class="muted">Empty</span>
+            {% endif %}
+          </td>
+          <td data-label="Verified by">
+            {% for verifier in statement.verifiers %}
+            <div data-verifier="{{ verifier.name }}" data-verified="{{ verifier.last_verified_label }}">
+              {{ verifier.name }} v{{ verifier.version }} · {{ verifier.last_verified_label }}
+            </div>
+            {% else %}
+            <span class="muted">No verifiers</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>This version has no statements.</p>
+  {% endif %}
+</section>
+{% endblock %}

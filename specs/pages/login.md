@@ -1,0 +1,1 @@
+Users can login using admin/admin. This will change in the future.

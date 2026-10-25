@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Contract Tester{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{% block body_class %}app{% endblock %}">
+  {% block header %}
+  <header class="topbar">
+    <a class="brand" href="/contracts">
+      <span class="mark" aria-hidden="true">CT</span>
+      <span>Contract Tester</span>
+    </a>
+    <nav aria-label="Primary">
+      <a href="/contracts" {% if section == "contracts" %}aria-current="page"{% endif %}>Contracts</a>
+      <a href="/organization" {% if section == "organization" %}aria-current="page"{% endif %}>Organization</a>
+    </nav>
+    <div class="account">
+      <span class="org">{{ organization_name }}</span>
+      <form method="post" action="/logout">
+        <button type="submit" class="linkish">Log out</button>
+      </form>
+    </div>
+  </header>
+  {% endblock %}
+  <main class="{% block main_class %}content{% endblock %}">
+    {% if flash %}
+    <p class="flash" role="status">{{ flash }}</p>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

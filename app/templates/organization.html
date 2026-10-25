@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Organization · Contract Tester{% endblock %}
+{% block content %}
+<h1>Organization</h1>
+<section class="section panel stack" aria-labelledby="name-heading">
+  <h2 id="name-heading">Name</h2>
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form class="stack" method="post" action="/organization">
+    <div class="field">
+      <label for="org-name">Organization name</label>
+      <input id="org-name" name="name" type="text" value="{{ name_value }}" autocomplete="organization" required>
+    </div>
+    <div>
+      <button class="button" id="save-organization" type="submit">Save name</button>
+    </div>
+  </form>
+</section>
+<section class="section panel stack" aria-labelledby="token-heading">
+  <h2 id="token-heading">Access token</h2>
+  <p>The access token authorizes REST API calls for this organization.</p>
+  {% if token %}
+  <p>Send header <code>Authorization: Bearer</code> and this token. Requests start at <code>/api</code>.</p>
+  <p class="muted">Requesting a new token replaces the current one.</p>
+  <code class="token" id="access-token">{{ token }}</code>
+  {% else %}
+  <p id="token-empty">No access token yet.</p>
+  {% endif %}
+  <form method="post" action="/organization/token">
+    <button class="button" id="request-token" type="submit">
+      {% if token %}Request a new access token{% else %}Request access token{% endif %}
+    </button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,1 @@
+Using an access token users can crud all the resources defined in model.

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Remove {{ contract_name }} · Contract Tester{% endblock %}
+{% block content %}
+<section class="panel stack confirm">
+  <h1>Remove {{ contract_name }}?</h1>
+  <p>Are you sure you want to remove {{ contract_name }}? Every version of this contract will be removed.</p>
+  <div class="actions">
+    <form method="post" action="/contracts/{{ contract_id }}/remove">
+      <button class="button danger" id="confirm-remove" type="submit">Yes, remove it</button>
+    </form>
+    <a class="button secondary" href="/contracts/{{ contract_id }}">Cancel</a>
+  </div>
+</section>
+{% endblock %}

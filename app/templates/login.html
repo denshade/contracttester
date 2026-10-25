@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Log in · Contract Tester{% endblock %}
+{% block body_class %}login-body{% endblock %}
+{% block header %}{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block content %}
+<section class="login-card">
+  <p class="mark-row"><span class="mark" aria-hidden="true">CT</span></p>
+  <h1>Log in</h1>
+  <p class="muted">Temporary sign-in is admin / admin.</p>
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form class="stack" method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <button class="button" id="login-submit" type="submit">Log in</button>
+  </form>
+</section>
+{% endblock %}
