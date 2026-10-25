@@ -9,15 +9,20 @@ from app.seed import (
     ACTIVE_VERIFIER,
     BILL_GET,
     BILL_POST,
+    BILL_PUBLISHER,
     BILL_POST_PAYLOAD,
     BILL_POST_STATE,
     DOCK_PAYLOAD,
+    DOCK_PUBLISHER,
     DOCK_POST,
     DOCK_STATE,
+    DOCK_TRIGGER,
     DOCK_VERIFIER,
     INACTIVE_CONTRACT,
+    LEGACY_TRIGGER,
     LEGACY_VERIFIED_AT,
     LEGACY_VERIFIER,
+    SCHEMA_TRIGGER,
 )
 
 
@@ -65,7 +70,9 @@ def test_login_and_logout(client):
 def test_contracts_overview_shows_active_verifier_state(auth_client):
     page = auth_client.get("/contracts")
     assert page.status_code == 200
-    assert "Active verifiers reflects the latest version" in page.text
+    assert "Active verifiers and the publisher reflect the latest version" in page.text
+    assert f'data-publisher="{BILL_PUBLISHER}"' in page.text
+    assert f'data-publisher="{DOCK_PUBLISHER}"' in page.text
     assert (
         f'data-contract-name="{ACTIVE_CONTRACT}"' in page.text
         and 'data-contract-name="Bill of Lading" data-contract-id="' in page.text
@@ -95,6 +102,7 @@ def test_contract_details_versions_statements_and_removal(auth_client):
 
     detail = auth_client.get(f"/contracts/{bill.group(1)}")
     assert detail.status_code == 200
+    assert f'value="{BILL_PUBLISHER}"' in detail.text
     assert 'data-version="1" data-active="no"' in detail.text
     assert 'data-version="2" data-active="yes" data-current="true"' in detail.text
     assert f'data-verifier="{ACTIVE_VERIFIER}"' in detail.text
@@ -112,12 +120,14 @@ def test_contract_details_versions_statements_and_removal(auth_client):
     )
     assert version_one
     older = auth_client.get(version_one.group(1))
+    assert f'value="{BILL_PUBLISHER}"' in older.text
     assert "This version has no active verifiers." in older.text
     assert f'data-verifier="{LEGACY_VERIFIER}"' in older.text
     assert f'data-verified="{format_timestamp(LEGACY_VERIFIED_AT)}"' in older.text
     assert ACTIVE_VERIFIER not in older.text
 
     dock_page = auth_client.get(f"/contracts/{dock.group(1)}")
+    assert f'value="{DOCK_PUBLISHER}"' in dock_page.text
     assert "This version has no active verifiers." in dock_page.text
     assert f'data-trigger="{DOCK_POST}"' in dock_page.text
     assert DOCK_STATE in dock_page.text
@@ -137,6 +147,63 @@ def test_contract_details_versions_statements_and_removal(auth_client):
     assert f'data-contract-name="{INACTIVE_CONTRACT}"' in removed.text
     assert auth_client.get(f"/contracts/{bill.group(1)}").status_code == 404
     assert auth_client.get(version_one.group(1)).status_code == 404
+
+
+def test_verifier_list_and_editable_details(auth_client):
+    listing = auth_client.get("/verifiers")
+    assert listing.status_code == 200
+    schema = re.search(
+        rf'data-verifier-name="{ACTIVE_VERIFIER}" data-verifier-id="(\d+)" data-active="yes"',
+        listing.text,
+    )
+    assert schema
+    assert LEGACY_TRIGGER in listing.text
+    assert DOCK_TRIGGER in listing.text
+    assert f'data-verifier-name="{LEGACY_VERIFIER}"' in listing.text
+    assert f'data-verifier-name="{DOCK_VERIFIER}"' in listing.text
+
+    detail = auth_client.get(f"/verifiers/{schema.group(1)}")
+    assert detail.status_code == 200
+    assert ACTIVE_CONTRACT in detail.text
+    assert BILL_GET in detail.text
+    assert format_timestamp(ACTIVE_VERIFIED_AT) in detail.text
+    assert f'value="{SCHEMA_TRIGGER}"' in detail.text
+
+    invalid = auth_client.post(
+        f"/verifiers/{schema.group(1)}",
+        data={
+            "name": ACTIVE_VERIFIER,
+            "version": "nope",
+            "active": "true",
+            "verification_trigger": SCHEMA_TRIGGER,
+        },
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 400
+    assert "Version must be a whole number" in invalid.text
+
+    saved = auth_client.post(
+        f"/verifiers/{schema.group(1)}",
+        data={
+            "name": "Payload schema",
+            "version": "4",
+            "active": "false",
+            "verification_trigger": "gitlab:payload-schema",
+        },
+        follow_redirects=True,
+    )
+    assert "Verifier saved." in saved.text
+    assert 'value="Payload schema"' in saved.text
+    assert 'value="4"' in saved.text
+    assert 'value="false" selected' in saved.text
+    assert 'value="gitlab:payload-schema"' in saved.text
+
+    refreshed = auth_client.get("/verifiers")
+    assert 'data-verifier-name="Payload schema" data-verifier-id="' in refreshed.text
+    assert re.search(r'data-verifier-name="Payload schema"[^>]*data-active="no"', refreshed.text)
+    missing = auth_client.get("/verifiers/99999")
+    assert missing.status_code == 404
+    assert "That verifier is not in this organization." in missing.text
 
 
 def test_organization_name_and_access_token(auth_client):

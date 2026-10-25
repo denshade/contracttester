@@ -100,12 +100,18 @@ class StatementCreate(StatementWrite):
 
 class ContractCreate(BaseModel):
     name: str
+    publisher_name: str
     statements: list[StatementWrite] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
     def clean_name(cls, value: str) -> str:
         return required_text(value, "Name")
+
+    @field_validator("publisher_name")
+    @classmethod
+    def clean_publisher_name(cls, value: str) -> str:
+        return required_text(value, "Publisher name")
 
 
 class ContractUpdate(BaseModel):
@@ -124,6 +130,7 @@ class ContractOut(BaseModel):
     name: str
     version: int
     company_id: int
+    publisher_name: str
 
 
 class StatementOut(BaseModel):
@@ -147,12 +154,18 @@ class VerifierWrite(BaseModel):
     name: str
     version: int
     active: bool = True
+    verification_trigger: str
     last_verified_at: datetime | None = None
 
     @field_validator("name")
     @classmethod
     def clean_name(cls, value: str) -> str:
         return required_text(value, "Verifier name")
+
+    @field_validator("verification_trigger")
+    @classmethod
+    def clean_trigger(cls, value: str) -> str:
+        return required_text(value, "Verification trigger", 500)
 
 
 class VerifierOut(BaseModel):
@@ -163,6 +176,7 @@ class VerifierOut(BaseModel):
     name: str
     version: int
     active: bool
+    verification_trigger: str
     last_verified_at: datetime | None
 
 
@@ -186,6 +200,12 @@ class TestOut(BaseModel):
 
 class PublisherWrite(BaseModel):
     contract_id: int
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return required_text(value, "Publisher name")
 
 
 class PublisherOut(BaseModel):
@@ -193,3 +213,4 @@ class PublisherOut(BaseModel):
 
     id: int
     contract_id: int
+    name: str

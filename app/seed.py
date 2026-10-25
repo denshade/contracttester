@@ -16,9 +16,14 @@ BILL_POST_PAYLOAD = '{"shipper":"Harbor"}'
 DOCK_POST = "POST /docks"
 DOCK_STATE = "202 Accepted"
 DOCK_PAYLOAD = '{"dock":"B"}'
+BILL_PUBLISHER = "Harbor Shipping"
+DOCK_PUBLISHER = "North Quay"
 ACTIVE_VERIFIER = "Schema shape"
 LEGACY_VERIFIER = "Legacy checksum"
 DOCK_VERIFIER = "Window check"
+SCHEMA_TRIGGER = "gitlab:schema-shape"
+LEGACY_TRIGGER = "gitlab:legacy-checksum"
+DOCK_TRIGGER = "gitlab:dock-window"
 ACTIVE_VERIFIED_AT = datetime(2026, 10, 20, 15, 30, tzinfo=timezone.utc)
 LEGACY_VERIFIED_AT = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
 SCHEMA_TEST = "status is present"
@@ -42,12 +47,13 @@ def seed_if_empty(db: Session) -> None:
         company,
         ACTIVE_CONTRACT,
         1,
+        BILL_PUBLISHER,
         [
             _statement(
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
-                [_verifier(LEGACY_VERIFIER, 1, False, LEGACY_VERIFIED_AT, [LEGACY_TEST])],
+                [_verifier(LEGACY_VERIFIER, 1, False, LEGACY_VERIFIED_AT, LEGACY_TRIGGER, [LEGACY_TEST])],
             )
         ],
     )
@@ -55,12 +61,13 @@ def seed_if_empty(db: Session) -> None:
         company,
         ACTIVE_CONTRACT,
         2,
+        BILL_PUBLISHER,
         [
             _statement(
                 BILL_GET,
                 BILL_GET_STATE,
                 "",
-                [_verifier(ACTIVE_VERIFIER, 1, True, ACTIVE_VERIFIED_AT, [SCHEMA_TEST])],
+                [_verifier(ACTIVE_VERIFIER, 1, True, ACTIVE_VERIFIED_AT, SCHEMA_TRIGGER, [SCHEMA_TEST])],
             ),
             _statement(BILL_POST, BILL_POST_STATE, BILL_POST_PAYLOAD, []),
         ],
@@ -69,12 +76,13 @@ def seed_if_empty(db: Session) -> None:
         company,
         INACTIVE_CONTRACT,
         1,
+        DOCK_PUBLISHER,
         [
             _statement(
                 DOCK_POST,
                 DOCK_STATE,
                 DOCK_PAYLOAD,
-                [_verifier(DOCK_VERIFIER, 3, False, None, [DOCK_TEST])],
+                [_verifier(DOCK_VERIFIER, 3, False, None, DOCK_TRIGGER, [DOCK_TEST])],
             )
         ],
     )
@@ -82,8 +90,21 @@ def seed_if_empty(db: Session) -> None:
     db.commit()
 
 
-def _verifier(name: str, version: int, active: bool, last_verified_at: datetime | None, tests: list[str]) -> Verifier:
-    verifier = Verifier(name=name, version=version, active=active, last_verified_at=last_verified_at)
+def _verifier(
+    name: str,
+    version: int,
+    active: bool,
+    last_verified_at: datetime | None,
+    verification_trigger: str,
+    tests: list[str],
+) -> Verifier:
+    verifier = Verifier(
+        name=name,
+        version=version,
+        active=active,
+        verification_trigger=verification_trigger,
+        last_verified_at=last_verified_at,
+    )
     for test_name in tests:
         VerifierTest(verifier=verifier, name=test_name)
     return verifier
@@ -96,9 +117,9 @@ def _statement(trigger: str, expected_state: str, payload: str, verifiers: list[
     return statement
 
 
-def _contract(company: Company, name: str, version: int, statements: list[Statement]) -> Contract:
+def _contract(company: Company, name: str, version: int, publisher_name: str, statements: list[Statement]) -> Contract:
     contract = Contract(company=company, name=name, version=version)
-    Publisher(contract=contract)
+    Publisher(contract=contract, name=publisher_name)
     for statement in statements:
         statement.contract = contract
     return contract

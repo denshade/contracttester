@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Verifiers · Contract Tester{% endblock %}
+{% block content %}
+<h1>Verifiers</h1>
+<p class="lede">Verifiers defined for {{ organization_name }}.</p>
+{% if verifiers %}
+<div class="table-wrap">
+  <table class="stack-rows">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Version</th>
+        <th scope="col">Active</th>
+        <th scope="col">Verification trigger</th>
+      </tr>
+    </thead>
+    <tbody id="verifiers">
+      {% for verifier in verifiers %}
+      <tr data-verifier-name="{{ verifier.name }}" data-verifier-id="{{ verifier.id }}" data-active="{{ 'yes' if verifier.active else 'no' }}">
+        <td data-label="Name"><a href="/verifiers/{{ verifier.id }}">{{ verifier.name }}</a></td>
+        <td data-label="Version">{{ verifier.version }}</td>
+        <td data-label="Active"><span class="pill {{ 'yes' if verifier.active else 'no' }}">{{ "Yes" if verifier.active else "No" }}</span></td>
+        <td data-label="Verification trigger"><code>{{ verifier.verification_trigger }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p id="verifiers-empty">No verifiers are defined yet.</p>
+{% endif %}
+{% endblock %}

@@ -5,6 +5,8 @@ contract <*-1> version
 contract <1-*> statement
 publisher <1-1> contract
 
+publisher <1-1> name
+
 statement <1-1> trigger (endpoint)
 statement <1-1> expected state
 statement <1-1> payload
@@ -14,7 +16,8 @@ statement <1-*> verifier
 verifier <1-1> name
 verifier <1-1> version
 verifier <1-1> active
-verifier <1-*> test
+verifier <1-1> verification trigger
+statement + verifier <1-1> statement verification
 
 company <1-*> contract
 company <1-*> user
@@ -26,3 +29,5 @@ Invariants:
 Whenever statements are added to a contract or removed a new version is generated. 
 The version is a number. 
 contract and version are unique, this means no two contracts can exist with the same name and version. 
+
+Verifiers are triggered through verification triggers. e.g. a gitlab job is started. This gitlab job runs tests for a specific version that is passed as a parameter.

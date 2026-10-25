@@ -168,6 +168,8 @@ label {
 
 input[type="text"],
 input[type="password"],
+input[type="number"],
+select,
 input:not([type]) {
   width: 100%;
   max-width: 28rem;
@@ -347,6 +349,33 @@ code {
 
 .confirm {
   max-width: 38rem;
+}
+
+.back {
+  margin-bottom: 0.6rem;
+}
+
+.facts {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+}
+
+.facts div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.facts dt {
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
 }
 
 .login-wrap {

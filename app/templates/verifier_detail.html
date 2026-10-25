@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ verifier.name }} · Contract Tester{% endblock %}
+{% block content %}
+<p class="back"><a href="/verifiers">Verifiers</a></p>
+<h1>{{ verifier.name }}</h1>
+<dl class="facts">
+  <div>
+    <dt>Contract</dt>
+    <dd><a href="/contracts/{{ verifier.contract_id }}">{{ verifier.contract_name }}</a> · version {{ verifier.contract_version }}</dd>
+  </div>
+  <div>
+    <dt>Endpoint</dt>
+    <dd><code>{{ verifier.statement_trigger }}</code></dd>
+  </div>
+  <div>
+    <dt>Last verified</dt>
+    <dd>{{ verifier.last_verified_label }}</dd>
+  </div>
+</dl>
+<section class="panel stack" aria-labelledby="edit-heading">
+  <h2 id="edit-heading">Attributes</h2>
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form class="stack" method="post" action="/verifiers/{{ verifier.id }}">
+    <div class="field">
+      <label for="verifier-name">Name</label>
+      <input id="verifier-name" name="name" type="text" value="{{ name_value }}" required>
+    </div>
+    <div class="field">
+      <label for="verifier-version">Version</label>
+      <input id="verifier-version" name="version" type="number" step="1" value="{{ version_value }}" required>
+    </div>
+    <div class="field">
+      <label for="verifier-active">Active</label>
+      <select id="verifier-active" name="active">
+        <option value="true" {% if active_value %}selected{% endif %}>Yes</option>
+        <option value="false" {% if not active_value %}selected{% endif %}>No</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="verifier-trigger">Verification trigger</label>
+      <input id="verifier-trigger" name="verification_trigger" type="text" value="{{ trigger_value }}" required>
+      <p class="muted">The job that runs this verifier. The version is passed to that job.</p>
+    </div>
+    <div>
+      <button class="button" id="save-verifier" type="submit">Save verifier</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -5,19 +5,21 @@
 <p class="lede">Contracts defined for {{ organization_name }}.</p>
 {% if contracts %}
 <div class="table-wrap">
-  <table>
-    <caption>Active verifiers reflects the latest version of each contract.</caption>
+  <table class="stack-rows">
+    <caption>Active verifiers and the publisher reflect the latest version of each contract.</caption>
     <thead>
       <tr>
         <th scope="col">Name</th>
+        <th scope="col">Publisher</th>
         <th scope="col">Active verifiers</th>
       </tr>
     </thead>
     <tbody id="contracts">
       {% for contract in contracts %}
-      <tr data-contract-name="{{ contract.name }}" data-contract-id="{{ contract.id }}" data-active="{{ 'yes' if contract.has_active_verifiers else 'no' }}">
-        <td><a href="/contracts/{{ contract.id }}">{{ contract.name }}</a></td>
-        <td><span class="pill {{ 'yes' if contract.has_active_verifiers else 'no' }}">{{ "Yes" if contract.has_active_verifiers else "No" }}</span></td>
+      <tr data-contract-name="{{ contract.name }}" data-contract-id="{{ contract.id }}" data-active="{{ 'yes' if contract.has_active_verifiers else 'no' }}" data-publisher="{{ contract.publisher_name }}">
+        <td data-label="Name"><a href="/contracts/{{ contract.id }}">{{ contract.name }}</a></td>
+        <td data-label="Publisher">{{ contract.publisher_name }}</td>
+        <td data-label="Active verifiers"><span class="pill {{ 'yes' if contract.has_active_verifiers else 'no' }}">{{ "Yes" if contract.has_active_verifiers else "No" }}</span></td>
       </tr>
       {% endfor %}
     </tbody>

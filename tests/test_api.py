@@ -5,7 +5,16 @@ from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Company, Contract, Publisher, Statement, User, Verifier, VerifierTest
-from app.seed import ACTIVE_CONTRACT, ACTIVE_VERIFIER, DOCK_VERIFIER, LEGACY_VERIFIER, SCHEMA_TEST
+from app.seed import (
+    ACTIVE_CONTRACT,
+    ACTIVE_VERIFIER,
+    BILL_PUBLISHER,
+    DOCK_PUBLISHER,
+    DOCK_VERIFIER,
+    INACTIVE_CONTRACT,
+    LEGACY_VERIFIER,
+    SCHEMA_TEST,
+)
 
 
 def _versions(api, name):
@@ -35,7 +44,10 @@ def test_seed_relationships(api):
     publishers = api.get("/api/publishers").json()
     users = api.get("/api/users").json()
     assert sorted(item["contract_id"] for item in publishers) == sorted(item["id"] for item in contracts)
-    assert {item["name"] for item in contracts} == {ACTIVE_CONTRACT, "Dock Appointment"}
+    assert {item["name"] for item in contracts} == {ACTIVE_CONTRACT, INACTIVE_CONTRACT}
+    assert {item["publisher_name"] for item in contracts if item["name"] == ACTIVE_CONTRACT} == {BILL_PUBLISHER}
+    assert {item["publisher_name"] for item in contracts if item["name"] == INACTIVE_CONTRACT} == {DOCK_PUBLISHER}
+    assert {item["name"] for item in publishers} == {BILL_PUBLISHER, DOCK_PUBLISHER}
     assert sorted(item["version"] for item in contracts if item["name"] == ACTIVE_CONTRACT) == [1, 2]
     assert set(users[0]) == {"id", "name", "email", "company_id"}
     verifier_names = {item["name"] for item in api.get("/api/verifiers").json()}
@@ -62,9 +74,9 @@ def test_contract_name_and_version_are_unique(app):
         db.commit()
 
         contract = db.scalar(select(Contract).where(Contract.name == "Dup", Contract.version == 1))
-        db.add(Publisher(contract_id=contract.id))
+        db.add(Publisher(contract_id=contract.id, name="Desk"))
         db.commit()
-        db.add(Publisher(contract_id=contract.id))
+        db.add(Publisher(contract_id=contract.id, name="Desk"))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
@@ -75,14 +87,16 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
         "/api/contracts",
         json={
             "name": "Orders",
+            "publisher_name": "Desk",
             "statements": [{"trigger": "GET /orders", "expected_state": "200 OK", "payload": ""}],
         },
     )
     assert created.status_code == 201
     first = created.json()
     assert first["version"] == 1
+    assert first["publisher_name"] == "Desk"
     assert isinstance(first["version"], int)
-    assert api.post("/api/contracts", json={"name": "Orders"}).status_code == 409
+    assert api.post("/api/contracts", json={"name": "Orders", "publisher_name": "Desk"}).status_code == 409
     assert api.post("/api/contracts", json={"name": "  "}).status_code == 422
 
     original = _statements(api, first["id"])[0]
@@ -93,6 +107,7 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
             "name": "Shape",
             "version": 1,
             "active": True,
+            "verification_trigger": "gitlab:shape",
             "last_verified_at": "2026-10-20T15:30:00Z",
         },
     )
@@ -119,12 +134,14 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
     assert _verifiers(api, original["id"])[0]["id"] == verifier.json()["id"]
 
     second_id = created_statement["contract_id"]
+    assert next(item for item in api.get("/api/contracts").json() if item["id"] == second_id)["publisher_name"] == "Desk"
     copied = next(item for item in _statements(api, second_id) if item["trigger"] == "GET /orders")
     fresh = next(item for item in _statements(api, second_id) if item["trigger"] == "POST /orders")
     copied_verifier = _verifiers(api, copied["id"])[0]
     assert copied_verifier["id"] != verifier.json()["id"]
     assert copied_verifier["name"] == "Shape"
     assert copied_verifier["active"] is True
+    assert copied_verifier["verification_trigger"] == "gitlab:shape"
     assert copied_verifier["last_verified_at"].startswith("2026-10-20T15:30:00")
     assert _verifiers(api, fresh["id"]) == []
     copied_tests = [item for item in api.get("/api/tests").json() if item["verifier_id"] == copied_verifier["id"]]
@@ -172,7 +189,11 @@ def test_adding_or_removing_a_statement_creates_a_new_version(api):
 def test_rename_keeps_the_version_family_together(api):
     created = api.post(
         "/api/contracts",
-        json={"name": "Parcel", "statements": [{"trigger": "GET /parcels", "expected_state": "200 OK", "payload": ""}]},
+        json={
+            "name": "Parcel",
+            "publisher_name": "Desk",
+            "statements": [{"trigger": "GET /parcels", "expected_state": "200 OK", "payload": ""}],
+        },
     ).json()
     api.post(
         "/api/statements",
@@ -187,7 +208,11 @@ def test_rename_keeps_the_version_family_together(api):
 def test_delete_one_version_keeps_the_others(api):
     created = api.post(
         "/api/contracts",
-        json={"name": "Crates", "statements": [{"trigger": "GET /crates", "expected_state": "200 OK", "payload": ""}]},
+        json={
+            "name": "Crates",
+            "publisher_name": "Desk",
+            "statements": [{"trigger": "GET /crates", "expected_state": "200 OK", "payload": ""}],
+        },
     ).json()
     added = api.post(
         "/api/statements",
@@ -204,12 +229,22 @@ def test_delete_one_version_keeps_the_others(api):
 def test_verifier_and_test_crud_and_overview_flag(api):
     created = api.post(
         "/api/contracts",
-        json={"name": "Yard Check", "statements": [{"trigger": "GET /yard", "expected_state": "200 OK", "payload": "{}"}]},
+        json={
+            "name": "Yard Check",
+            "publisher_name": "Desk",
+            "statements": [{"trigger": "GET /yard", "expected_state": "200 OK", "payload": "{}"}],
+        },
     ).json()
     statement = _statements(api, created["id"])[0]
     verifier = api.post(
         "/api/verifiers",
-        json={"statement_id": statement["id"], "name": "Yard schema", "version": 4, "active": True},
+        json={
+            "statement_id": statement["id"],
+            "name": "Yard schema",
+            "version": 4,
+            "active": True,
+            "verification_trigger": "gitlab:yard",
+        },
     )
     assert verifier.status_code == 201
     verifier_id = verifier.json()["id"]
@@ -223,6 +258,7 @@ def test_verifier_and_test_crud_and_overview_flag(api):
             "name": "Yard schema",
             "version": 5,
             "active": False,
+            "verification_trigger": "gitlab:yard",
             "last_verified_at": None,
         },
     )
@@ -249,16 +285,20 @@ def test_publisher_stays_one_to_one(api):
     assert api.delete(f"/api/publishers/{publisher['id']}").status_code == 409
     moved = api.put(
         f"/api/publishers/{publisher['id']}",
-        json={"contract_id": publishers[1]["contract_id"]},
+        json={"contract_id": publishers[1]["contract_id"], "name": "Moved"},
     )
     assert moved.status_code == 409
     kept = api.put(
         f"/api/publishers/{publisher['id']}",
-        json={"contract_id": publisher["contract_id"]},
+        json={"contract_id": publisher["contract_id"], "name": "Pier Office"},
     )
     assert kept.status_code == 200
     assert kept.json()["id"] == publisher["id"]
-    assert api.post("/api/publishers", json={"contract_id": publisher["contract_id"]}).status_code == 409
+    assert kept.json()["name"] == "Pier Office"
+    assert api.post(
+        "/api/publishers",
+        json={"contract_id": publisher["contract_id"], "name": "Other"},
+    ).status_code == 409
 
 
 def test_user_and_company_crud(api, app):

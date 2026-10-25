@@ -73,12 +73,19 @@ class Contract(Base):
         order_by="Statement.id",
     )
 
+    @property
+    def publisher_name(self) -> str:
+        if self.publisher is None:
+            return ""
+        return self.publisher.name
+
 
 class Publisher(Base):
     __tablename__ = "publishers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
 
     contract: Mapped[Contract] = relationship(back_populates="publisher")
 
@@ -112,6 +119,7 @@ class Verifier(Base):
     name: Mapped[str] = mapped_column(String(200))
     version: Mapped[int] = mapped_column()
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    verification_trigger: Mapped[str] = mapped_column(String(500), default="")
     last_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     statement: Mapped[Statement] = relationship(back_populates="verifiers")

@@ -129,6 +129,95 @@ def request_token(request: Request, db: Db, user: CurrentUser) -> RedirectRespon
     return RedirectResponse("/organization", status_code=303)
 
 
+@router.get("/verifiers")
+def verifiers(request: Request, db: Db, user: CurrentUser):
+    rows = services.verifier_catalog(db, user.company_id)
+    return render(request, "verifiers.html", user, section="verifiers", verifiers=rows)
+
+
+@router.get("/verifiers/{verifier_id}")
+def verifier_detail(verifier_id: int, request: Request, db: Db, user: CurrentUser):
+    try:
+        detail = services.verifier_page(db, user.company_id, verifier_id)
+    except DomainError as exc:
+        if exc.status_code != 404:
+            raise
+        return _missing_verifier(request, user)
+    return render(
+        request,
+        "verifier_detail.html",
+        user,
+        section="verifiers",
+        verifier=detail,
+        error=None,
+        name_value=detail.name,
+        version_value=str(detail.version),
+        active_value=detail.active,
+        trigger_value=detail.verification_trigger,
+    )
+
+
+@router.post("/verifiers/{verifier_id}")
+def save_verifier(
+    verifier_id: int,
+    request: Request,
+    db: Db,
+    user: CurrentUser,
+    name: str = Form(),
+    version: str = Form(),
+    active: str = Form(),
+    verification_trigger: str = Form(),
+):
+    try:
+        verifier = services.get_verifier(db, user.company_id, verifier_id)
+    except DomainError as exc:
+        if exc.status_code != 404:
+            raise
+        return _missing_verifier(request, user)
+    try:
+        if active not in {"true", "false"}:
+            raise DomainError(400, "Active must be yes or no")
+        services.update_verifier_attributes(
+            db,
+            verifier,
+            name,
+            version,
+            active == "true",
+            verification_trigger,
+        )
+    except DomainError as exc:
+        db.rollback()
+        detail = services.verifier_page(db, user.company_id, verifier_id)
+        return render(
+            request,
+            "verifier_detail.html",
+            user,
+            status_code=exc.status_code,
+            section="verifiers",
+            verifier=detail,
+            error=exc.detail,
+            name_value=name,
+            version_value=version,
+            active_value=active == "true",
+            trigger_value=verification_trigger,
+        )
+    request.session["flash"] = "Verifier saved."
+    return RedirectResponse(f"/verifiers/{verifier_id}", status_code=303)
+
+
+def _missing_verifier(request: Request, user: User):
+    return render(
+        request,
+        "not_found.html",
+        user,
+        status_code=404,
+        section="verifiers",
+        message="That verifier is not in this organization.",
+        back_href="/verifiers",
+        back_label="Back to verifiers",
+    )
+
+
 @router.get("/contracts")
 def contracts(request: Request, db: Db, user: CurrentUser):
     rows = services.contract_overview(db, user.company_id)
@@ -144,6 +233,36 @@ def contract_detail(contract_id: int, request: Request, db: Db, user: CurrentUse
             raise
         return render(request, "not_found.html", user, status_code=404, section="contracts")
     return render(request, "contract_detail.html", user, section="contracts", contract=detail)
+
+
+@router.post("/contracts/{contract_id}/publisher")
+def update_contract_publisher(
+    contract_id: int,
+    request: Request,
+    db: Db,
+    user: CurrentUser,
+    name: str = Form(),
+):
+    try:
+        contract = services.get_contract(db, user.company_id, contract_id)
+        services.update_publisher_name(db, contract, name)
+    except DomainError as exc:
+        if exc.status_code == 404:
+            return render(request, "not_found.html", user, status_code=404, section="contracts")
+        db.rollback()
+        detail = services.contract_detail(db, user.company_id, contract_id)
+        return render(
+            request,
+            "contract_detail.html",
+            user,
+            status_code=exc.status_code,
+            section="contracts",
+            contract=detail,
+            error=exc.detail,
+            publisher_value=name,
+        )
+    request.session["flash"] = "Publisher saved."
+    return RedirectResponse(f"/contracts/{contract_id}", status_code=303)
 
 
 @router.get("/contracts/{contract_id}/remove")

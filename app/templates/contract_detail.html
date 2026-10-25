@@ -9,6 +9,22 @@
   <a class="button danger" id="remove-contract" href="/contracts/{{ contract.id }}/remove">Remove contract</a>
 </div>
 
+<section class="section panel stack" aria-labelledby="publisher-heading">
+  <h2 id="publisher-heading">Publisher</h2>
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form class="stack" method="post" action="/contracts/{{ contract.id }}/publisher">
+    <div class="field">
+      <label for="publisher-name">Publisher name</label>
+      <input id="publisher-name" name="name" type="text" value="{{ publisher_value|default(contract.publisher_name) }}" required>
+    </div>
+    <div>
+      <button class="button" id="save-publisher" type="submit">Save publisher</button>
+    </div>
+  </form>
+</section>
+
 <section class="section" aria-labelledby="versions-heading">
   <h2 id="versions-heading">Versions</h2>
   <div class="table-wrap">
@@ -47,7 +63,7 @@
       <tbody id="active-verifiers">
         {% for verifier in contract.active_verifiers %}
         <tr data-verifier="{{ verifier.name }}">
-          <td data-label="Name">{{ verifier.name }}</td>
+          <td data-label="Name"><a href="/verifiers/{{ verifier.id }}">{{ verifier.name }}</a></td>
           <td data-label="Version">{{ verifier.version }}</td>
           <td data-label="Endpoint"><code>{{ verifier.statement_trigger }}</code></td>
           <td data-label="Last verified">{{ verifier.last_verified_label }}</td>
@@ -89,7 +105,7 @@
           <td data-label="Verified by">
             {% for verifier in statement.verifiers %}
             <div data-verifier="{{ verifier.name }}" data-verified="{{ verifier.last_verified_label }}">
-              {{ verifier.name }} v{{ verifier.version }} · {{ verifier.last_verified_label }}
+              <a href="/verifiers/{{ verifier.id }}">{{ verifier.name }}</a> v{{ verifier.version }} · {{ verifier.last_verified_label }}
             </div>
             {% else %}
             <span class="muted">No verifiers</span>

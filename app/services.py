@@ -25,13 +25,38 @@ class ContractSummary:
     id: int
     name: str
     version: int
+    publisher_name: str
     has_active_verifiers: bool
 
 
 @dataclass(frozen=True)
 class VerifierView:
+    id: int
     name: str
     version: int
+    statement_trigger: str
+    last_verified_label: str
+
+
+@dataclass(frozen=True)
+class VerifierSummary:
+    id: int
+    name: str
+    version: int
+    active: bool
+    verification_trigger: str
+
+
+@dataclass(frozen=True)
+class VerifierDetail:
+    id: int
+    name: str
+    version: int
+    active: bool
+    verification_trigger: str
+    contract_id: int
+    contract_name: str
+    contract_version: int
     statement_trigger: str
     last_verified_label: str
 
@@ -57,6 +82,7 @@ class ContractDetail:
     id: int
     name: str
     version: int
+    publisher_name: str
     versions: list[VersionView]
     active_verifiers: list[VerifierView]
     statements: list[StatementView]
@@ -180,8 +206,13 @@ def delete_user(db: Session, user: User) -> None:
 def list_contracts(db: Session, company_id: int) -> list[Contract]:
     return list(
         db.scalars(
-            select(Contract).where(Contract.company_id == company_id).order_by(Contract.name, Contract.version)
-        ).all()
+            select(Contract)
+            .where(Contract.company_id == company_id)
+            .options(joinedload(Contract.publisher))
+            .order_by(Contract.name, Contract.version)
+        )
+        .unique()
+        .all()
     )
 
 
@@ -192,14 +223,15 @@ def get_contract(db: Session, company_id: int, contract_id: int) -> Contract:
     return contract
 
 
-def create_contract(db: Session, company_id: int, name: str, statements: list) -> Contract:
+def create_contract(db: Session, company_id: int, name: str, publisher_name: str, statements: list) -> Contract:
     name = _clean_name(name, "Name")
+    publisher_name = _clean_name(publisher_name, "Publisher name")
     if db.scalar(select(Contract.id).where(Contract.name == name).limit(1)) is not None:
         raise DomainError(409, "A contract with this name already exists")
     contract = Contract(company_id=company_id, name=name, version=1)
     db.add(contract)
     db.flush()
-    db.add(Publisher(contract=contract))
+    db.add(Publisher(contract=contract, name=publisher_name))
     for item in statements:
         trigger, expected_state, payload = _clean_statement(item.trigger, item.expected_state, item.payload)
         db.add(
@@ -338,6 +370,67 @@ def get_verifier(db: Session, company_id: int, verifier_id: int) -> Verifier:
     return verifier
 
 
+def verifier_catalog(db: Session, company_id: int) -> list[VerifierSummary]:
+    verifiers = list(
+        db.scalars(
+            select(Verifier)
+            .join(Statement)
+            .join(Contract)
+            .where(Contract.company_id == company_id)
+            .order_by(Verifier.name, Verifier.version, Verifier.id)
+        ).all()
+    )
+    return [
+        VerifierSummary(
+            id=verifier.id,
+            name=verifier.name,
+            version=verifier.version,
+            active=verifier.active,
+            verification_trigger=verifier.verification_trigger,
+        )
+        for verifier in verifiers
+    ]
+
+
+def verifier_page(db: Session, company_id: int, verifier_id: int) -> VerifierDetail:
+    verifier = get_verifier(db, company_id, verifier_id)
+    statement = verifier.statement
+    contract = statement.contract
+    return VerifierDetail(
+        id=verifier.id,
+        name=verifier.name,
+        version=verifier.version,
+        active=verifier.active,
+        verification_trigger=verifier.verification_trigger,
+        contract_id=contract.id,
+        contract_name=contract.name,
+        contract_version=contract.version,
+        statement_trigger=statement.trigger,
+        last_verified_label=format_timestamp(verifier.last_verified_at),
+    )
+
+
+def update_verifier_attributes(
+    db: Session,
+    verifier: Verifier,
+    name: str,
+    version: str,
+    active: bool,
+    verification_trigger: str,
+) -> Verifier:
+    try:
+        parsed_version = int(version)
+    except (TypeError, ValueError):
+        raise DomainError(400, "Version must be a whole number") from None
+    verifier.name = _clean_name(name, "Verifier name")
+    verifier.version = parsed_version
+    verifier.active = active
+    verifier.verification_trigger = _clean_name(verification_trigger, "Verification trigger", 500)
+    _commit(db)
+    db.refresh(verifier)
+    return verifier
+
+
 def create_verifier(
     db: Session,
     company_id: int,
@@ -345,6 +438,7 @@ def create_verifier(
     name: str,
     version: int,
     active: bool,
+    verification_trigger: str,
     last_verified_at,
 ) -> Verifier:
     statement = get_statement(db, company_id, statement_id)
@@ -353,6 +447,7 @@ def create_verifier(
         name=_clean_name(name, "Verifier name"),
         version=version,
         active=active,
+        verification_trigger=_clean_name(verification_trigger, "Verification trigger", 500),
         last_verified_at=last_verified_at,
     )
     db.add(verifier)
@@ -369,6 +464,7 @@ def update_verifier(
     name: str,
     version: int,
     active: bool,
+    verification_trigger: str,
     last_verified_at,
 ) -> Verifier:
     statement = get_statement(db, company_id, statement_id)
@@ -376,6 +472,7 @@ def update_verifier(
     verifier.name = _clean_name(name, "Verifier name")
     verifier.version = version
     verifier.active = active
+    verifier.verification_trigger = _clean_name(verification_trigger, "Verification trigger", 500)
     verifier.last_verified_at = last_verified_at
     _commit(db)
     db.refresh(verifier)
@@ -455,21 +552,37 @@ def get_publisher(db: Session, company_id: int, publisher_id: int) -> Publisher:
     return publisher
 
 
-def create_publisher(db: Session, company_id: int, contract_id: int) -> Publisher:
+def create_publisher(db: Session, company_id: int, contract_id: int, name: str) -> Publisher:
     contract = get_contract(db, company_id, contract_id)
     if contract.publisher is not None:
         raise DomainError(409, "This contract already has a publisher")
-    publisher = Publisher(contract=contract)
+    publisher = Publisher(contract=contract, name=_clean_name(name, "Publisher name"))
     db.add(publisher)
     _commit(db)
     db.refresh(publisher)
     return publisher
 
 
-def update_publisher(db: Session, company_id: int, publisher: Publisher, contract_id: int) -> Publisher:
+def update_publisher(db: Session, company_id: int, publisher: Publisher, contract_id: int, name: str) -> Publisher:
     if contract_id != publisher.contract_id:
         raise DomainError(409, "A publisher cannot be moved to another contract")
     get_contract(db, company_id, contract_id)
+    publisher.name = _clean_name(name, "Publisher name")
+    _commit(db)
+    db.refresh(publisher)
+    return publisher
+
+
+def update_publisher_name(db: Session, contract: Contract, name: str) -> Publisher:
+    name = _clean_name(name, "Publisher name")
+    publisher = contract.publisher
+    if publisher is None:
+        publisher = Publisher(contract=contract, name=name)
+        db.add(publisher)
+    else:
+        publisher.name = name
+    _commit(db)
+    db.refresh(publisher)
     return publisher
 
 
@@ -490,8 +603,13 @@ def has_active_verifiers(db: Session, contract_id: int) -> bool:
 def contract_overview(db: Session, company_id: int) -> list[ContractSummary]:
     contracts = list(
         db.scalars(
-            select(Contract).where(Contract.company_id == company_id).order_by(Contract.name, Contract.version)
-        ).all()
+            select(Contract)
+            .where(Contract.company_id == company_id)
+            .options(joinedload(Contract.publisher))
+            .order_by(Contract.name, Contract.version)
+        )
+        .unique()
+        .all()
     )
     latest: dict[str, Contract] = {}
     for contract in contracts:
@@ -501,6 +619,7 @@ def contract_overview(db: Session, company_id: int) -> list[ContractSummary]:
             id=contract.id,
             name=contract.name,
             version=contract.version,
+            publisher_name=contract.publisher_name,
             has_active_verifiers=has_active_verifiers(db, contract.id),
         )
         for contract in latest.values()
@@ -541,6 +660,7 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
         id=contract.id,
         name=contract.name,
         version=contract.version,
+        publisher_name=contract.publisher_name,
         versions=[
             VersionView(
                 id=item.id,
@@ -569,6 +689,7 @@ def contract_detail(db: Session, company_id: int, contract_id: int) -> ContractD
 def _verifier_view(verifier: Verifier, trigger: str | None = None) -> VerifierView:
     statement_trigger = trigger if trigger is not None else verifier.statement.trigger
     return VerifierView(
+        id=verifier.id,
         name=verifier.name,
         version=verifier.version,
         statement_trigger=statement_trigger,
@@ -595,7 +716,8 @@ def _fork(db: Session, source: Contract, exclude_statement_id: int | None = None
     forked = Contract(company_id=source.company_id, name=source.name, version=latest + 1)
     db.add(forked)
     db.flush()
-    db.add(Publisher(contract=forked))
+    publisher_name = source.publisher.name if source.publisher is not None else ""
+    db.add(Publisher(contract=forked, name=publisher_name))
     statements = db.scalars(
         select(Statement)
         .where(Statement.contract_id == source.id)
@@ -623,6 +745,7 @@ def _copy_statement(db: Session, source: Statement, target: Contract) -> None:
             name=verifier.name,
             version=verifier.version,
             active=verifier.active,
+            verification_trigger=verifier.verification_trigger,
             last_verified_at=verifier.last_verified_at,
         )
         db.add(verifier_copy)

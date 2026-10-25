@@ -96,7 +96,7 @@ def list_contracts(db: Db, company: CurrentCompany) -> list:
 @router.post("/contracts", response_model=ContractOut, status_code=201, tags=["contracts"])
 def create_contract(body: ContractCreate, db: Db, company: CurrentCompany) -> object:
     """Creates version 1. Later statement adds and removals create the next versions."""
-    return services.create_contract(db, company.id, body.name, body.statements)
+    return services.create_contract(db, company.id, body.name, body.publisher_name, body.statements)
 
 
 @router.get("/contracts/{contract_id}", response_model=ContractOut, tags=["contracts"])
@@ -171,6 +171,7 @@ def create_verifier(body: VerifierWrite, db: Db, company: CurrentCompany) -> obj
         body.name,
         body.version,
         body.active,
+        body.verification_trigger,
         body.last_verified_at,
     )
 
@@ -191,6 +192,7 @@ def update_verifier(verifier_id: int, body: VerifierWrite, db: Db, company: Curr
         body.name,
         body.version,
         body.active,
+        body.verification_trigger,
         body.last_verified_at,
     )
 
@@ -237,7 +239,7 @@ def list_publishers(db: Db, company: CurrentCompany) -> list:
 
 @router.post("/publishers", response_model=PublisherOut, status_code=201, tags=["publishers"])
 def create_publisher(body: PublisherWrite, db: Db, company: CurrentCompany) -> object:
-    return services.create_publisher(db, company.id, body.contract_id)
+    return services.create_publisher(db, company.id, body.contract_id, body.name)
 
 
 @router.get("/publishers/{publisher_id}", response_model=PublisherOut, tags=["publishers"])
@@ -248,7 +250,7 @@ def get_publisher(publisher_id: int, db: Db, company: CurrentCompany) -> object:
 @router.put("/publishers/{publisher_id}", response_model=PublisherOut, tags=["publishers"])
 def update_publisher(publisher_id: int, body: PublisherWrite, db: Db, company: CurrentCompany) -> object:
     publisher = services.get_publisher(db, company.id, publisher_id)
-    return services.update_publisher(db, company.id, publisher, body.contract_id)
+    return services.update_publisher(db, company.id, publisher, body.contract_id, body.name)
 
 
 @router.delete("/publishers/{publisher_id}", tags=["publishers"])

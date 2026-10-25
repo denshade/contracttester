@@ -2,6 +2,6 @@
 {% block title %}Not found · Contract Tester{% endblock %}
 {% block content %}
 <h1>Not found</h1>
-<p>That contract is not in this organization.</p>
-<p><a href="/contracts">Back to contracts</a></p>
+<p>{{ message|default("That contract is not in this organization.") }}</p>
+<p><a href="{{ back_href|default('/contracts') }}">{{ back_label|default("Back to contracts") }}</a></p>
 {% endblock %}

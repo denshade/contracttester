@@ -17,10 +17,13 @@ from app.seed import (
     ACTIVE_VERIFIED_AT,
     ACTIVE_VERIFIER,
     BILL_POST,
+    BILL_PUBLISHER,
     BILL_POST_PAYLOAD,
     BILL_POST_STATE,
+    DOCK_PUBLISHER,
     DOCK_VERIFIER,
     INACTIVE_CONTRACT,
+    SCHEMA_TRIGGER,
     LEGACY_VERIFIED_AT,
     LEGACY_VERIFIER,
 )
@@ -81,7 +84,30 @@ def test_sign_in_shows_which_contracts_have_active_verifiers(page: Page, base_ur
     expect(page.locator(".org")).to_have_text("Harbor & Co.")
     expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_attribute("data-active", "yes")
     expect(page.locator(f"tr[data-contract-name='{INACTIVE_CONTRACT}']")).to_have_attribute("data-active", "no")
-    expect(page.get_by_text("Active verifiers reflects the latest version of each contract.")).to_be_visible()
+    expect(page.get_by_text("Active verifiers and the publisher reflect the latest version of each contract.")).to_be_visible()
+    expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_attribute("data-publisher", BILL_PUBLISHER)
+    expect(page.locator(f"tr[data-contract-name='{INACTIVE_CONTRACT}']")).to_have_attribute("data-publisher", DOCK_PUBLISHER)
+
+
+def test_contract_page_saves_the_publisher_name(page: Page, base_url: str):
+    _sign_in(page, base_url)
+    page.get_by_role("link", name=ACTIVE_CONTRACT).click()
+    expect(page.locator("#publisher-name")).to_have_value(BILL_PUBLISHER)
+
+    page.locator("#publisher-name").fill("   ")
+    page.locator("#save-publisher").click()
+    expect(page.locator(".error")).to_have_text("Publisher name is required")
+
+    page.locator("#publisher-name").fill("Pier Office")
+    page.locator("#save-publisher").click()
+    expect(page.locator(".flash")).to_have_text("Publisher saved.")
+    expect(page.locator("#publisher-name")).to_have_value("Pier Office")
+
+    page.locator("tr[data-version='1'] a").click()
+    expect(page.locator("#publisher-name")).to_have_value(BILL_PUBLISHER)
+
+    page.locator("nav").get_by_role("link", name="Contracts").click()
+    expect(page.locator(f"tr[data-contract-name='{ACTIVE_CONTRACT}']")).to_have_attribute("data-publisher", "Pier Office")
 
 
 def test_contract_page_shows_versions_verifiers_and_statements(page: Page, base_url: str):
@@ -173,6 +199,41 @@ def test_organization_page_saves_the_name_and_issues_a_token(page: Page, base_ur
     assert anonymous == 401
 
 
+def test_verifier_page_lists_fields_and_saves_edits(page: Page, base_url: str):
+    _sign_in(page, base_url)
+    page.locator("nav").get_by_role("link", name="Verifiers").click()
+    expect(page.get_by_role("heading", name="Verifiers")).to_be_visible()
+
+    row = page.locator(f"tr[data-verifier-name='{ACTIVE_VERIFIER}']")
+    expect(row).to_have_attribute("data-active", "yes")
+    expect(row).to_contain_text("1")
+    expect(row).to_contain_text(SCHEMA_TRIGGER)
+    row.get_by_role("link", name=ACTIVE_VERIFIER).click()
+
+    expect(page.locator("#verifier-name")).to_have_value(ACTIVE_VERIFIER)
+    expect(page.locator("#verifier-version")).to_have_value("1")
+    expect(page.locator("#verifier-active")).to_have_value("true")
+    expect(page.locator("#verifier-trigger")).to_have_value(SCHEMA_TRIGGER)
+    expect(page.get_by_role("link", name=ACTIVE_CONTRACT)).to_be_visible()
+    expect(page.get_by_text(format_timestamp(ACTIVE_VERIFIED_AT))).to_be_visible()
+
+    page.locator("#verifier-name").fill("Payload schema")
+    page.locator("#verifier-version").fill("4")
+    page.locator("#verifier-active").select_option("false")
+    page.locator("#verifier-trigger").fill("gitlab:payload-schema")
+    page.locator("#save-verifier").click()
+
+    expect(page.locator(".flash")).to_have_text("Verifier saved.")
+    expect(page.locator("#verifier-name")).to_have_value("Payload schema")
+    expect(page.locator("#verifier-version")).to_have_value("4")
+    expect(page.locator("#verifier-active")).to_have_value("false")
+    expect(page.locator("#verifier-trigger")).to_have_value("gitlab:payload-schema")
+
+    page.locator("nav").get_by_role("link", name="Verifiers").click()
+    expect(page.locator("tr[data-verifier-name='Payload schema']")).to_have_attribute("data-active", "no")
+    expect(page.locator("tr[data-verifier-name='Payload schema']")).to_contain_text("gitlab:payload-schema")
+
+
 def test_log_out_returns_to_the_login_page(page: Page, base_url: str):
     _sign_in(page, base_url)
     page.get_by_role("button", name="Log out").click()
@@ -188,7 +249,7 @@ def test_statement_details_stay_readable_on_a_narrow_screen(page: Page, base_url
 
     expect(page.locator("#statements thead")).to_be_hidden()
     expect(page.locator("#active-verifiers-empty")).to_be_visible()
-    expect(page.get_by_text(f"{DOCK_VERIFIER} v3 · Not verified")).to_be_visible()
+    expect(page.locator("#statements")).to_contain_text(f"{DOCK_VERIFIER} v3 · Not verified")
 
 
 def _sign_in(page: Page, base_url: str, username: str = "admin", password: str = "admin") -> None:
